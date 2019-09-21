@@ -40,6 +40,7 @@ type DemandOpts struct {
 	Target uint64
 	Name   string
 	JSON   string
+	Cdata *api.Content
 }
 
 // SupplyOpts is sender options for Supply
@@ -48,6 +49,7 @@ type SupplyOpts struct {
 	Target    uint64
 	Name      string
 	JSON      string
+	Cdata	*api.Content
 }
 
 func init() {
@@ -213,7 +215,9 @@ func (clt *SMServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 		TargetId:   spo.Target,
 		ChannelType:       clt.ChannelType,
 		SupplyName: spo.Name,
+		Ts: ptypes.TimestampNow(),
 		ArgJson:    spo.JSON,
+		Cdata: spo.Cdata,
 	}
 
 	//	switch clt.ChannelType {//
