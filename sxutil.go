@@ -233,7 +233,7 @@ func (clt *SMServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 		log.Printf("%v.ProposeSupply err %v, [%v]", clt, err, sp)
 		return 0 // should check...
 	}
-	log.Println("ProposeSupply Response:", resp, ":PID ",pid)
+//	log.Println("ProposeSupply Response:", resp, ":PID ",pid)
 	return pid
 }
 
@@ -252,7 +252,7 @@ func (clt *SMServiceClient) SelectSupply(sp *api.Supply)  (uint64, error) {
 		log.Printf("%v.SelectSupply err %v", clt, err)
 		return 0, err
 	}
-	log.Println("SelectSupply Response:", resp)
+//	log.Println("SelectSupply Response:", resp)
 	// if mbus is OK, start mbus!
 	clt.MbusID = IDType(resp.MbusId)
 	if clt.MbusID != 0 {
@@ -277,7 +277,7 @@ func (clt *SMServiceClient) SelectDemand(dm *api.Demand) error {
 		log.Printf("%v.SelectDemand err %v", clt, err)
 		return err
 	}
-	log.Println("SelectDemand Response:", resp)
+//	log.Println("SelectDemand Response:", resp)
 	return nil
 }
 
@@ -300,8 +300,7 @@ func (clt *SMServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SMSe
 			}
 			break
 		}
-		log.Println("Receive SS:", *sp)
-		// call Callback!
+//		log.Println("Receive SS:", *sp)
 		spcb(clt, sp)
 	}
 	return err
@@ -326,7 +325,7 @@ func (clt *SMServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SMSe
 			}
 			break
 		}
-		log.Println("Receive SD:",*dm)
+//		log.Println("Receive SD:",*dm)
 		// call Callback!
 		dmcb(clt, dm)
 	}
@@ -357,7 +356,7 @@ func (clt *SMServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SMServ
 			}
 			break
 		}
-		log.Printf("Receive Mbus Message %v", *mes)
+//		log.Printf("Receive Mbus Message %v", *mes)
 		// call Callback!
 		mbcb(clt, mes)
 	}
@@ -474,7 +473,7 @@ func (clt *SMServiceClient) Confirm(id IDType) error {
 		return err
 	}
 	clt.MbusID = id
-	log.Println("Confirm Success:", resp)
+//	log.Println("Confirm Success:", resp)
 	return nil
 }
 
