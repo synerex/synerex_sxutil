@@ -31,6 +31,8 @@ var (
 	nupd       *nodeapi.NodeUpdate
 	numu       sync.RWMutex
 	myNodeName string
+	myServerAddress = ""
+	isServFlag bool
 	conn       *grpc.ClientConn
 	clt        nodeapi.NodeClient
 )
@@ -52,6 +54,13 @@ type SupplyOpts struct {
 	JSON      string
 	Cdata	*api.Content
 }
+
+type SxServerOpt struct {
+	ServerAddress string
+	ClusterId int32
+	AreaId string
+}
+
 
 func init() {
 	fmt.Println("Synergic Exchange Util init() is called!")
@@ -84,42 +93,15 @@ func SetNodeStatus(status int32, arg string) {
 	numu.Unlock()
 }
 
-func startKeepAlive() {
-	for {
-		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
-		time.Sleep(time.Second * time.Duration(nid.KeepaliveDuration))
-		if nid.Secret == 0 { // this means the node is disconnected
-			break
-		}
-		numu.RLock()
-		nupd.UpdateCount++
-		clt.KeepAlive(context.Background(), nupd)
-		numu.RUnlock()
-	}
-}
-
-// RegisterNodeName is a function to register node name with node server address
-func RegisterNodeName(nodesrv string, nm string, isServ bool) error { // register ID to server
-	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithInsecure()) // insecure
-	var err error
-	conn, err = grpc.Dial(nodesrv, opts...)
-	if err != nil {
-		log.Printf("fail to dial: %v", err)
-		return err
-	}
-	//	defer conn.Close()
-
-	clt = nodeapi.NewNodeClient(conn)
+func reconnectNodeServ() error { // re_send connection info to server.
 	nif := nodeapi.NodeInfo{
-		NodeName: nm,
-		IsServer: isServ,
+		NodeName: myNodeName,
+		IsServer: isServFlag,
+		ServerAddress: myServerAddress,
 		NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
 	}
-	myNodeName = nm
 	var ee error
 	nid, ee = clt.RegisterNode(context.Background(), &nif)
-
 	if ee != nil { // has error!
 		log.Println("Error on get NodeID", ee)
 		return ee
@@ -127,7 +109,7 @@ func RegisterNodeName(nodesrv string, nm string, isServ bool) error { // registe
 		var nderr error
 		node, nderr = snowflake.NewNode(int64(nid.NodeId))
 		if nderr != nil {
-			fmt.Println("Error in initializing snowflake:", err)
+			fmt.Println("Error in initializing snowflake:", nderr)
 			return nderr
 		} else {
 			fmt.Println("Successfully Initialize node ", nid.NodeId)
@@ -141,10 +123,99 @@ func RegisterNodeName(nodesrv string, nm string, isServ bool) error { // registe
 		NodeStatus:  0,
 		NodeArg:     "",
 	}
+	//	fmt.Println("KeepAlive started!")
+	return nil
+}
+
+
+// for simple keepalive
+func startKeepAlive() {
+	for {
+		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
+		time.Sleep(time.Second * time.Duration(nid.KeepaliveDuration))
+		if nid.Secret == 0 { // this means the node is disconnected
+			break
+		}
+		numu.RLock()
+		nupd.UpdateCount++
+		resp, err := clt.KeepAlive(context.Background(), nupd)
+		numu.RUnlock()
+		if err != nil {
+			log.Printf("Error in response %v:%v", resp, err)
+		}
+		if !resp.Ok { // there might be some errors in response
+			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
+				reconnectNodeServ()
+			}
+		}
+	}
+}
+
+
+// RegisterNode is a function to register Node with node server address
+func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithInsecure()) // insecure
+	var err error
+	conn, err = grpc.Dial(nodesrv, opts...)
+	if err != nil {
+		log.Printf("fail to dial: %v", err)
+		return "",err
+	}
+	//	defer conn.Close()
+
+	clt = nodeapi.NewNodeClient(conn)
+	var nif nodeapi.NodeInfo
+	if serv == nil {
+		nif = nodeapi.NodeInfo{
+			NodeName: nm,
+			IsServer: false,
+			ServerAddress: "",
+			NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
+			WithNodeId: -1, // initial registration
+			ClusterId: 0, // default cluster
+			AreaId: "Default", //default area
+			ChannelTypes:channels, // channel types
+		}
+	}else {
+		nif = nodeapi.NodeInfo{
+			NodeName: nm,
+			IsServer: true,
+			ServerAddress: serv.ServerAddress,
+			NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
+			WithNodeId: -1, // initial registration
+			ClusterId: serv.ClusterId, // default cluster
+			AreaId: serv.AreaId, //default area
+			ChannelTypes:channels, // channel types
+		}
+	}
+	myNodeName = nm
+	var ee error
+	nid, ee = clt.RegisterNode(context.Background(), &nif)
+	if ee != nil { // has error!
+		log.Println("Error on get NodeID", ee)
+		return "",ee
+	} else {
+		var nderr error
+		node, nderr = snowflake.NewNode(int64(nid.NodeId))
+		if nderr != nil {
+			fmt.Println("Error in initializing snowflake:", err)
+			return "",nderr
+		} else {
+			fmt.Println("Successfully Initialize node ", nid.NodeId)
+		}
+	}
+	nupd = &nodeapi.NodeUpdate{
+		NodeId:      nid.NodeId,
+		Secret:      nid.Secret,
+		UpdateCount: 0,
+		NodeStatus:  0,
+		NodeArg:     "",
+	}
 	// start keepalive goroutine
 	go startKeepAlive()
 	//	fmt.Println("KeepAlive started!")
-	return nil
+	return nid.ServerAddress, nil
 }
 
 // UnRegisterNode de-registrate node id

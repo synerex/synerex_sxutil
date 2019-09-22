@@ -15,6 +15,10 @@ github.com/synerex/synerex_api v0.0.1/go.mod h1:F6CqUVgHclr+VtaQ+BAaFHsrYBKm7P/f
 github.com/synerex/synerex_nodeapi v0.0.1 h1:IAZtYnUbjJccY1NiHcfNuobx2EJaair02C6mAVk4300=
 github.com/synerex/synerex_nodeapi v0.0.1/go.mod h1:UM6Xrtb2oMti3AQ7uNR3bEcS2FHiQqsK2nKb97vZuYs=
 github.com/synerex/synerex_nodeapi v0.1.1/go.mod h1:UM6Xrtb2oMti3AQ7uNR3bEcS2FHiQqsK2nKb97vZuYs=
+github.com/synerex/synerex_nodeapi v0.2.1/go.mod h1:UM6Xrtb2oMti3AQ7uNR3bEcS2FHiQqsK2nKb97vZuYs=
+github.com/synerex/synerex_nodeapi v0.3.1 h1:8L9QoEx/JR80fYc/3IUewlc1z0gAJO9kp/8phiiMYMw=
+github.com/synerex/synerex_nodeapi v0.3.1/go.mod h1:UM6Xrtb2oMti3AQ7uNR3bEcS2FHiQqsK2nKb97vZuYs=
+github.com/synerex/synerex_proto v0.1.1 h1:rqo27uW4DKkmstq6bl21F4RaSYYvDpJICDM/i2a4WTQ=
 github.com/synerex/synerex_proto v0.1.1/go.mod h1:YU29N7auJhYQWPPsPqbLlNTZazCuDuYkDJgw2xFsYck=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3/go.mod h1:6SW0HCj/g11FgYtHlgUYUwCkIfeOF89ocIRzGO/8vkc=
