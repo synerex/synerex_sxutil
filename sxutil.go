@@ -141,9 +141,9 @@ func startKeepAlive() {
 		resp, err := clt.KeepAlive(context.Background(), nupd)
 		numu.RUnlock()
 		if err != nil {
-			log.Printf("Error in response %v:%v", resp, err)
+			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
 		}
-		if !resp.Ok { // there might be some errors in response
+		if resp != nil &&  !resp.Ok { // there might be some errors in response
 			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
 				reconnectNodeServ()
 			}
