@@ -228,7 +228,7 @@ func (clt *SMServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := clt.Client.ProposeSupply(ctx, sp)
+	_ , err := clt.Client.ProposeSupply(ctx, sp)
 	if err != nil {
 		log.Printf("%v.ProposeSupply err %v, [%v]", clt, err, sp)
 		return 0 // should check...
@@ -249,13 +249,14 @@ func (clt *SMServiceClient) SelectSupply(sp *api.Supply)  (uint64, error) {
 	defer cancel()
 	resp, err := clt.Client.SelectSupply(ctx, tgt)
 	if err != nil {
-		log.Printf("%v.SelectSupply err %v", clt, err)
+		log.Printf("%v.SelectSupply err %v %v", clt, err, resp)
 		return 0, err
 	}
 //	log.Println("SelectSupply Response:", resp)
 	// if mbus is OK, start mbus!
 	clt.MbusID = IDType(resp.MbusId)
 	if clt.MbusID != 0 {
+//TODO:  We need to implement Mbus systems
 		//		clt.SubscribeMbus()
 	}
 
@@ -274,7 +275,7 @@ func (clt *SMServiceClient) SelectDemand(dm *api.Demand) error {
 	defer cancel()
 	resp, err := clt.Client.SelectDemand(ctx, tgt)
 	if err != nil {
-		log.Printf("%v.SelectDemand err %v", clt, err)
+		log.Printf("%v.SelectDemand err %v %v", clt, err, resp)
 		return err
 	}
 //	log.Println("SelectDemand Response:", resp)
@@ -469,7 +470,7 @@ func (clt *SMServiceClient) Confirm(id IDType) error {
 	defer cancel()
 	resp, err := clt.Client.Confirm(ctx, tg)
 	if err != nil {
-		log.Printf("%v Confirm Failier %v", clt, err)
+		log.Printf("%v Confirm Failier %v %v", clt, err, resp)
 		return err
 	}
 	clt.MbusID = id
