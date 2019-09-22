@@ -463,7 +463,7 @@ func (clt *SMServiceClient) CloseMbus(ctx context.Context) error {
 }
 
 // NotifyDemand sends Typed Demand to Server
-func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) uint64 {
+func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) ( uint64 , error) {
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	dm := api.Demand{
@@ -481,25 +481,20 @@ func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) uint64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	//	log.Printf("Now NotifyDemand with %v",dm)
-	//	log.Printf("Arg %v",dm.ArgOneof)
-	//	log.Printf("Arg %v",dm.GetArg_RideShare())
-
-
 	_ , err := clt.Client.NotifyDemand(ctx, &dm)
 
 	//	resp, err := clt.Client.NotifyDemand(ctx, &dm)
 	if err != nil {
 		log.Printf("%v.NotifyDemand err %v", clt, err)
-		return 0
+		return 0, err
 	}
 	//	log.Println(resp)
 	dmo.ID = id // assign ID
-	return id
+	return id, nil
 }
 
 // NotifySupply sends Typed Supply to Server
-func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) uint64 {
+func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	dm := api.Supply{
@@ -512,8 +507,6 @@ func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) uint64 {
 		Cdata: smo.Cdata,
 	}
 
-	// TODO:
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	//	resp , err := clt.Client.NotifySupply(ctx, &dm)
@@ -521,11 +514,11 @@ func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) uint64 {
 	_, err := clt.Client.NotifySupply(ctx, &dm)
 	if err != nil {
 		log.Printf("Error for sending:NotifySupply to  Synerex Server as %v ", err)
-		return 0
+		return 0, err
 	}
 	//	log.Println("RegiterSupply:", smo, resp)
 	smo.ID = id // assign ID
-	return id
+	return id, nil
 }
 
 // Confirm sends confirm message to sender
