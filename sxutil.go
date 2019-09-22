@@ -167,6 +167,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 	clt = nodeapi.NewNodeClient(conn)
 	var nif nodeapi.NodeInfo
 	if serv == nil {
+		isServFlag = false
 		nif = nodeapi.NodeInfo{
 			NodeName: nm,
 			IsServer: false,
@@ -178,6 +179,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 			ChannelTypes:channels, // channel types
 		}
 	}else {
+		isServFlag = true
 		nif = nodeapi.NodeInfo{
 			NodeName: nm,
 			IsServer: true,
