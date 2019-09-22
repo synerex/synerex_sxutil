@@ -8,6 +8,7 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	api "github.com/synerex/synerex_api"
 	nodeapi "github.com/synerex/synerex_nodeapi"
+	pbase "github.com/synerex/synerex_proto"
 	"google.golang.org/grpc"
 	"io"
 	"log"
@@ -113,6 +114,7 @@ func RegisterNodeName(nodesrv string, nm string, isServ bool) error { // registe
 	nif := nodeapi.NodeInfo{
 		NodeName: nm,
 		IsServer: isServ,
+		NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
 	}
 	myNodeName = nm
 	var ee error
@@ -400,6 +402,7 @@ func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) uint64 {
 		DemandName: dmo.Name,
 		Ts:         ts,
 		ArgJson:    dmo.JSON,
+		Cdata: dmo.Cdata,
 	}
 	//	switch clt.ChannelType {
 	//	}
@@ -407,16 +410,16 @@ func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) uint64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	//	log.Printf("Now RegisterDemand with %v",dm)
+	//	log.Printf("Now NotifyDemand with %v",dm)
 	//	log.Printf("Arg %v",dm.ArgOneof)
 	//	log.Printf("Arg %v",dm.GetArg_RideShare())
 
 
 	_ , err := clt.Client.NotifyDemand(ctx, &dm)
 
-	//	resp, err := clt.Client.RegisterDemand(ctx, &dm)
+	//	resp, err := clt.Client.NotifyDemand(ctx, &dm)
 	if err != nil {
-		log.Printf("%v.RegisterDemand err %v", clt, err)
+		log.Printf("%v.NotifyDemand err %v", clt, err)
 		return 0
 	}
 	//	log.Println(resp)
@@ -435,17 +438,18 @@ func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) uint64 {
 		SupplyName: smo.Name,
 		Ts:         ts,
 		ArgJson:    smo.JSON,
+		Cdata: smo.Cdata,
 	}
 
 	// TODO:
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	//	resp , err := clt.Client.RegisterSupply(ctx, &dm)
+	//	resp , err := clt.Client.NotifySupply(ctx, &dm)
 
 	_, err := clt.Client.NotifySupply(ctx, &dm)
 	if err != nil {
-		log.Printf("Error for sending:RegisterSupply to  Synerex Server as %v ", err)
+		log.Printf("Error for sending:NotifySupply to  Synerex Server as %v ", err)
 		return 0
 	}
 	//	log.Println("RegiterSupply:", smo, resp)
