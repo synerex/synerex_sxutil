@@ -17,10 +17,9 @@ import (
 )
 
 
-// SMUtil.go is a helper utility package for Synerex
+// sxutil.go is a helper utility package for Synerex
 
 // Helper structures for Synerex
-
 
 // IDType for all ID in Synerex
 type IDType uint64
@@ -238,6 +237,19 @@ type SXServiceClient struct {
 	ArgJson  string
 	MbusID   IDType
 }
+
+// Utility Function for Conneting gRPC server
+func GrpcConnectServer(serverAddress string) api.SynerexClient{ // TODO: we may add connection option
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithInsecure())  // currently we do not use sercure connection //TODO: we need to udpate SSL
+	conn, err := grpc.Dial(serverAddress, opts...)
+	if err != nil {
+		log.Printf("fail to connect server %s: %v",serverAddress, err)
+		return nil
+	}
+	return api.NewSynerexClient(conn)
+}
+
 
 // NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
 func NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
