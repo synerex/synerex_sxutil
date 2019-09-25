@@ -230,8 +230,8 @@ func UnRegisterNode() {
 	}
 }
 
-// SMServiceClient Wrappter Structure for market client
-type SMServiceClient struct {
+// SXServiceClient Wrappter Structure for market client
+type SXServiceClient struct {
 	ClientID IDType
 	ChannelType    uint32
 	Client   api.SynerexClient
@@ -239,9 +239,9 @@ type SMServiceClient struct {
 	MbusID   IDType
 }
 
-// NewSMServiceClient Creates wrapper structre SMServiceClient from SynerexClient
-func NewSMServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SMServiceClient {
-	s := &SMServiceClient{
+// NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
+func NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
+	s := &SXServiceClient{
 		ClientID: IDType(node.Generate()),
 		ChannelType:    mtype,
 		Client:   clt,
@@ -255,12 +255,12 @@ func GenerateIntID() uint64 {
 	return uint64(node.Generate())
 }
 
-func (clt SMServiceClient) getChannel() *api.Channel {
+func (clt SXServiceClient) getChannel() *api.Channel {
 	return &api.Channel{ClientId: uint64(clt.ClientID), ChannelType: clt.ChannelType, ArgJson: clt.ArgJson}
 }
 
 // IsSupplyTarget is a helper function to check target
-func (clt *SMServiceClient) IsSupplyTarget(sp *api.Supply, idlist []uint64) bool {
+func (clt *SXServiceClient) IsSupplyTarget(sp *api.Supply, idlist []uint64) bool {
 	spid := sp.TargetId
 	for _, id := range idlist {
 		if id == spid {
@@ -271,7 +271,7 @@ func (clt *SMServiceClient) IsSupplyTarget(sp *api.Supply, idlist []uint64) bool
 }
 
 // IsDemandTarget is a helper function to check target
-func (clt *SMServiceClient) IsDemandTarget(dm *api.Demand, idlist []uint64) bool {
+func (clt *SXServiceClient) IsDemandTarget(dm *api.Demand, idlist []uint64) bool {
 	dmid := dm.TargetId
 	for _, id := range idlist {
 		if id == dmid {
@@ -282,7 +282,7 @@ func (clt *SMServiceClient) IsDemandTarget(dm *api.Demand, idlist []uint64) bool
 }
 
 // ProposeSupply send proposal Supply message to server
-func (clt *SMServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
+func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 	pid := GenerateIntID()
 	sp := &api.Supply{
 		Id:         pid,
@@ -311,7 +311,7 @@ func (clt *SMServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 }
 
 // SelectSupply send select message to server
-func (clt *SMServiceClient) SelectSupply(sp *api.Supply)  (uint64, error) {
+func (clt *SXServiceClient) SelectSupply(sp *api.Supply)  (uint64, error) {
 	tgt := &api.Target{
 		Id:       GenerateIntID(),
 		SenderId: uint64(clt.ClientID),
@@ -337,7 +337,7 @@ func (clt *SMServiceClient) SelectSupply(sp *api.Supply)  (uint64, error) {
 }
 
 // SelectDemand send select message to server
-func (clt *SMServiceClient) SelectDemand(dm *api.Demand) error {
+func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 	tgt := &api.Target{
 		Id:       GenerateIntID(),
 		SenderId: uint64(clt.ClientID),
@@ -355,8 +355,8 @@ func (clt *SMServiceClient) SelectDemand(dm *api.Demand) error {
 	return nil
 }
 
-// SubscribeSupply  Wrapper function for SMServiceClient
-func (clt *SMServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SMServiceClient, *api.Supply)) error {
+// SubscribeSupply  Wrapper function for SXServiceClient
+func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXServiceClient, *api.Supply)) error {
 	ch := clt.getChannel()
 	smc, err := clt.Client.SubscribeSupply(ctx, ch)
 	if err != nil {
@@ -370,7 +370,7 @@ func (clt *SMServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SMSe
 			if err == io.EOF {
 				log.Print("End Supply subscribe OK")
 			} else {
-				log.Printf("%v SMServiceClient SubscribeSupply error [%v]", clt, err)
+				log.Printf("%v SXServiceClient SubscribeSupply error [%v]", clt, err)
 			}
 			break
 		}
@@ -380,8 +380,8 @@ func (clt *SMServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SMSe
 	return err
 }
 
-// SubscribeDemand  Wrapper function for SMServiceClient
-func (clt *SMServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SMServiceClient, *api.Demand)) error {
+// SubscribeDemand  Wrapper function for SXServiceClient
+func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXServiceClient, *api.Demand)) error {
 	ch := clt.getChannel()
 	dmc, err := clt.Client.SubscribeDemand(ctx, ch)
 	if err != nil {
@@ -395,7 +395,7 @@ func (clt *SMServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SMSe
 			if err == io.EOF {
 				log.Print("End Demand subscribe OK")
 			} else {
-				log.Printf("%v SMServiceClient SubscribeDemand error [%v]", clt, err)
+				log.Printf("%v SXServiceClient SubscribeDemand error [%v]", clt, err)
 			}
 			break
 		}
@@ -406,8 +406,8 @@ func (clt *SMServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SMSe
 	return err
 }
 
-// SubscribeMbus  Wrapper function for SMServiceClient
-func (clt *SMServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SMServiceClient, *api.MbusMsg)) error {
+// SubscribeMbus  Wrapper function for SXServiceClient
+func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServiceClient, *api.MbusMsg)) error {
 
 	mb := &api.Mbus{
 		ClientId: uint64(clt.ClientID),
@@ -426,7 +426,7 @@ func (clt *SMServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SMServ
 			if err == io.EOF {
 				log.Print("End Mbus subscribe OK")
 			} else {
-				log.Printf("%v SMServiceClient SubscribeMbus error %v", clt, err)
+				log.Printf("%v SXServiceClient SubscribeMbus error %v", clt, err)
 			}
 			break
 		}
@@ -437,7 +437,7 @@ func (clt *SMServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SMServ
 	return err
 }
 
-func (clt *SMServiceClient) SendMsg(ctx context.Context, msg *api.MbusMsg) error {
+func (clt *SXServiceClient) SendMsg(ctx context.Context, msg *api.MbusMsg) error {
 	if clt.MbusID == 0 {
 		return errors.New("No Mbus opened!")
 	}
@@ -449,7 +449,7 @@ func (clt *SMServiceClient) SendMsg(ctx context.Context, msg *api.MbusMsg) error
 	return err
 }
 
-func (clt *SMServiceClient) CloseMbus(ctx context.Context) error {
+func (clt *SXServiceClient) CloseMbus(ctx context.Context) error {
 	if clt.MbusID == 0 {
 		return errors.New("No Mbus opened!")
 	}
@@ -465,7 +465,7 @@ func (clt *SMServiceClient) CloseMbus(ctx context.Context) error {
 }
 
 // NotifyDemand sends Typed Demand to Server
-func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) ( uint64 , error) {
+func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) ( uint64 , error) {
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	dm := api.Demand{
@@ -496,7 +496,7 @@ func (clt *SMServiceClient) NotifyDemand(dmo *DemandOpts) ( uint64 , error) {
 }
 
 // NotifySupply sends Typed Supply to Server
-func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
+func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	dm := api.Supply{
@@ -524,7 +524,7 @@ func (clt *SMServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 }
 
 // Confirm sends confirm message to sender
-func (clt *SMServiceClient) Confirm(id IDType) error {
+func (clt *SXServiceClient) Confirm(id IDType) error {
 	tg := &api.Target{
 		Id:       GenerateIntID(),
 		SenderId: uint64(clt.ClientID),
