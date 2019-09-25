@@ -96,7 +96,7 @@ func reconnectNodeServ() error { // re_send connection info to server.
 	nif := nodeapi.NodeInfo{
 		NodeName: myNodeName,
 		IsServer: isServFlag,
-		ServerAddress: myServerAddress,
+		ServerAddress: myServerAddress, // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
 	}
 	var ee error
