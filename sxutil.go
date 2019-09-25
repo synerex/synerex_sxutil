@@ -25,15 +25,15 @@ import (
 type IDType uint64
 
 var (
-	node       *snowflake.Node // package variable for keeping unique ID.
-	nid        *nodeapi.NodeID
-	nupd       *nodeapi.NodeUpdate
-	numu       sync.RWMutex
-	myNodeName string
-	myServerAddress = ""
-	isServFlag bool
-	conn       *grpc.ClientConn
-	clt        nodeapi.NodeClient
+	node         *snowflake.Node // package variable for keeping unique ID.
+	nid          *nodeapi.NodeID
+	nupd         *nodeapi.NodeUpdate
+	numu         sync.RWMutex
+	myNodeName   string
+	myServerInfo = ""
+	myNodeType   nodeapi.NodeType
+	conn         *grpc.ClientConn
+	clt          nodeapi.NodeClient
 )
 
 // DemandOpts is sender options for Demand
@@ -55,9 +55,10 @@ type SupplyOpts struct {
 }
 
 type SxServerOpt struct {
-	ServerAddress string
-	ClusterId int32
-	AreaId string
+	NodeType   nodeapi.NodeType
+	ServerInfo string
+	ClusterId  int32
+	AreaId     string
 }
 
 
@@ -94,10 +95,10 @@ func SetNodeStatus(status int32, arg string) {
 
 func reconnectNodeServ() error { // re_send connection info to server.
 	nif := nodeapi.NodeInfo{
-		NodeName: myNodeName,
-		IsServer: isServFlag,
-		ServerAddress: myServerAddress, // TODO: this is not correctly initialized
-		NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
+		NodeName:         myNodeName,
+		NodeType:         myNodeType,
+		ServerInfo:    myServerInfo,             // TODO: this is not correctly initialized
+		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 	}
 	var ee error
 	nid, ee = clt.RegisterNode(context.Background(), &nif)
@@ -166,11 +167,11 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 	clt = nodeapi.NewNodeClient(conn)
 	var nif nodeapi.NodeInfo
 	if serv == nil {
-		isServFlag = false
+		myNodeType = nodeapi.NodeType_PROVIDER
 		nif = nodeapi.NodeInfo{
 			NodeName: nm,
-			IsServer: false,
-			ServerAddress: "",
+			NodeType: myNodeType,
+			ServerInfo: "",
 			NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
 			WithNodeId: -1, // initial registration
 			ClusterId: 0, // default cluster
@@ -178,16 +179,17 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 			ChannelTypes:channels, // channel types
 		}
 	}else {
-		isServFlag = true
+		myNodeType = serv.NodeType
+		myServerInfo = serv.ServerInfo
 		nif = nodeapi.NodeInfo{
-			NodeName: nm,
-			IsServer: true,
-			ServerAddress: serv.ServerAddress,
+			NodeName:         nm,
+			NodeType:         myNodeType,
+			ServerInfo:    myServerInfo,
 			NodePbaseVersion: pbase.ChannelTypeVersion,  // this is defined at compile time
-			WithNodeId: -1, // initial registration
-			ClusterId: serv.ClusterId, // default cluster
-			AreaId: serv.AreaId, //default area
-			ChannelTypes:channels, // channel types
+			WithNodeId:       -1, // initial registration
+			ClusterId:        serv.ClusterId, // default cluster
+			AreaId:           serv.AreaId, //default area
+			ChannelTypes:     channels, // channel types
 		}
 	}
 	myNodeName = nm
@@ -216,7 +218,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 	// start keepalive goroutine
 	go startKeepAlive()
 	//	fmt.Println("KeepAlive started!")
-	return nid.ServerAddress, nil
+	return nid.ServerInfo, nil
 }
 
 // UnRegisterNode de-registrate node id
