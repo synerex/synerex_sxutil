@@ -170,6 +170,9 @@ func startKeepAlive() {
 	}
 }
 
+func MsgCountUp() {
+	msgCount++
+}
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
