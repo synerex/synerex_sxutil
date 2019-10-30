@@ -62,6 +62,7 @@ type SxServerOpt struct {
 	ServerInfo string
 	ClusterId  int32
 	AreaId     string
+	GwInfo     string
 }
 
 
@@ -212,6 +213,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 			ClusterId:        serv.ClusterId, // default cluster
 			AreaId:           serv.AreaId, //default area
 			ChannelTypes:     channels, // channel types
+			GwInfo:           serv.GwInfo,
 		}
 	}
 	myNodeName = nm
