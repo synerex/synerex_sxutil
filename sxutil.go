@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/bwmarrin/snowflake"
 	"github.com/golang/protobuf/ptypes"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 	api "github.com/synerex/synerex_api"
 	nodeapi "github.com/synerex/synerex_nodeapi"
 	pbase "github.com/synerex/synerex_proto"
@@ -34,6 +36,7 @@ var (
 	myNodeType   nodeapi.NodeType
 	conn         *grpc.ClientConn
 	clt          nodeapi.NodeClient
+	msgCount	uint64
 )
 
 // DemandOpts is sender options for Demand
@@ -59,6 +62,7 @@ type SxServerOpt struct {
 	ServerInfo string
 	ClusterId  int32
 	AreaId     string
+	GwInfo     string
 }
 
 
@@ -131,11 +135,25 @@ func reconnectNodeServ() error { // re_send connection info to server.
 // for simple keepalive
 func startKeepAlive() {
 	for {
+		msgCount = 0; // how count message?
 		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
 		time.Sleep(time.Second * time.Duration(nid.KeepaliveDuration))
 		if nid.Secret == 0 { // this means the node is disconnected
 			break
 		}
+
+		if myNodeType ==  nodeapi.NodeType_SERVER {
+			c, _ := cpu.Percent(5, false)
+			v, _ := mem.VirtualMemory()
+			var status nodeapi.ServerStatus;
+			status = nodeapi.ServerStatus{
+				Cpu: c[0],
+				Memory: v.UsedPercent,
+				MsgCount: msgCount,
+			}
+			nupd.Status = &status;
+		}
+
 		numu.RLock()
 		nupd.UpdateCount++
 		resp, err := clt.KeepAlive(context.Background(), nupd)
@@ -146,11 +164,16 @@ func startKeepAlive() {
 		if resp != nil &&  !resp.Ok { // there might be some errors in response
 			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
 				reconnectNodeServ()
+			} else if resp.Command == nodeapi.KeepAliveCommand_SERVER_CHANGE {
+				reconnectNodeServ()
 			}
 		}
 	}
 }
 
+func MsgCountUp() {
+	msgCount++
+}
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
@@ -190,6 +213,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 			ClusterId:        serv.ClusterId, // default cluster
 			AreaId:           serv.AreaId, //default area
 			ChannelTypes:     channels, // channel types
+			GwInfo:           serv.GwInfo,
 		}
 	}
 	myNodeName = nm
