@@ -37,7 +37,10 @@ var (
 	conn         *grpc.ClientConn
 	clt          nodeapi.NodeClient
 	msgCount     uint64
+	nodeState    = NewNodeState()
 )
+
+const WAIT_TIME = 30
 
 // DemandOpts is sender options for Demand
 type DemandOpts struct {
@@ -63,6 +66,76 @@ type SxServerOpt struct {
 	ClusterId  int32
 	AreaId     string
 	GwInfo     string
+}
+
+type NodeState struct {
+	ProposedSupply []api.Supply
+	ProposedDemand []api.Demand
+	Locked bool
+}
+
+func NewNodeState() *NodeState {
+	obj := new(NodeState)
+	obj.init()
+
+	log.Println("Initializing NodeState")
+	return obj
+}
+
+func (ns NodeState) init() {
+	ns.ProposedSupply = []api.Supply{}
+	ns.ProposedDemand = []api.Demand{}
+	ns.Locked = false
+}
+
+func (ns NodeState) isSafeState() bool {
+	return len(ns.ProposedSupply) == 0 && len(ns.ProposedDemand) == 0
+}
+
+func (ns NodeState) proposeSupply(supply api.Supply) {
+	ns.ProposedSupply = append(ns.ProposedSupply, supply)
+}
+
+func (ns NodeState) selectSupply(id uint64) bool {
+
+	pos := -1
+	for i := 0; i < len(ns.ProposedSupply); i++ {
+		if ns.ProposedSupply[i].Id == id	{
+			pos = i
+		}
+	}
+
+	if pos >= 0 {
+		ns.ProposedSupply = append(ns.ProposedSupply[:pos], ns.ProposedSupply[pos+1:]...)
+		return true
+	} else {
+		log.Printf("not found supply[%d]\n", id)
+
+		return false
+	}
+}
+
+func (ns NodeState) proposeDemand(demand api.Demand) {
+	ns.ProposedDemand = append(ns.ProposedDemand, demand)
+}
+
+func (ns NodeState) selectDemand(id uint64) bool {
+
+	pos := -1
+	for i := 0; i < len(ns.ProposedDemand); i++ {
+		if ns.ProposedDemand[i].Id == id {
+			pos = i
+		}
+	}
+
+	if pos >= 0 {
+		ns.ProposedDemand = append(ns.ProposedDemand[:pos], ns.ProposedDemand[pos+1:]...)
+		return true
+	} else {
+		log.Printf("not found demand[%d]\n", id)
+
+		return false
+	}
 }
 
 func init() {
@@ -132,6 +205,10 @@ func reconnectNodeServ() error { // re_send connection info to server.
 
 // for simple keepalive
 func startKeepAlive() {
+	startKeepAliveAndProc(nil)
+}
+
+func startKeepAliveAndProc(fn func()) {
 	for {
 		msgCount = 0 // how count message?
 		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
@@ -163,7 +240,24 @@ func startKeepAlive() {
 			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
 				reconnectNodeServ()
 			} else if resp.Command == nodeapi.KeepAliveCommand_SERVER_CHANGE {
-				reconnectNodeServ()
+				if nodeState.isSafeState() {
+					UnRegisterNode()
+					if fn != nil {
+						fn()
+						nodeState.init()
+					}
+				} else {
+					// wait
+					if !nodeState.Locked {
+						nodeState.Locked = true
+						go func() {
+							t := time.NewTicker(WAIT_TIME * time.Second) // 30 seconds
+							<-t.C
+							nodeState.init()
+							t.Stop() // タイマを止める。
+						}()
+					}
+				}
 			}
 		}
 	}
@@ -175,6 +269,10 @@ func MsgCountUp() {
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
+	return RegisterNodeAndProc(nodesrv, nm, channels, serv, nil)
+}
+
+func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, fn func()) (string, error) { // register ID to server
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // insecure
 	var err error
@@ -238,7 +336,7 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 		NodeArg:     "",
 	}
 	// start keepalive goroutine
-	go startKeepAlive()
+	go startKeepAliveAndProc(fn)
 	//	fmt.Println("KeepAlive started!")
 	return nid.ServerInfo, nil
 }
@@ -342,6 +440,9 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 		return 0 // should check...
 	}
 	//	log.Println("ProposeSupply Response:", resp, ":PID ",pid)
+
+	nodeState.proposeSupply(*sp)
+
 	return pid
 }
 
@@ -368,6 +469,8 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 		//		clt.SubscribeMbus()
 	}
 
+	nodeState.selectSupply(sp.Id)
+
 	return uint64(clt.MbusID), nil
 }
 
@@ -387,6 +490,9 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 		return err
 	}
 	//	log.Println("SelectDemand Response:", resp)
+
+	nodeState.selectDemand(dm.Id)
+
 	return nil
 }
 
@@ -409,8 +515,13 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 			}
 			break
 		}
-		//		log.Println("Receive SS:", *sp)
-		spcb(clt, sp)
+		log.Println("Receive SS:", *sp)
+
+		if !nodeState.Locked {
+			spcb(clt, sp)
+		} else {
+			log.Println("Provider is locked!")
+		}
 	}
 	return err
 }
@@ -434,9 +545,14 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 			}
 			break
 		}
-		//		log.Println("Receive SD:",*dm)
+		log.Println("Receive SD:",*dm)
+
 		// call Callback!
-		dmcb(clt, dm)
+		if !nodeState.Locked {
+			dmcb(clt, dm)
+		} else {
+			log.Println("Provider is locked!")
+		}
 	}
 	return err
 }
@@ -576,5 +692,9 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 	}
 	clt.MbusID = id
 	//	log.Println("Confirm Success:", resp)
+
+	nodeState.selectDemand(uint64(id))
+	nodeState.selectSupply(uint64(id))
+
 	return nil
 }
