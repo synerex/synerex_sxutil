@@ -89,14 +89,18 @@ func (ns NodeState) init() {
 }
 
 func (ns NodeState) isSafeState() bool {
+	log.Printf("NodeState#isSafeState is called[%v]", nodeState)
+
 	return len(ns.ProposedSupply) == 0 && len(ns.ProposedDemand) == 0
 }
 
 func (ns NodeState) proposeSupply(supply api.Supply) {
+	log.Printf("NodeState#proposeSupply[%d] is called", supply.Id)
 	ns.ProposedSupply = append(ns.ProposedSupply, supply)
 }
 
 func (ns NodeState) selectSupply(id uint64) bool {
+	log.Printf("NodeState#selectSupply[%d] is called\n", id)
 
 	pos := -1
 	for i := 0; i < len(ns.ProposedSupply); i++ {
@@ -116,10 +120,12 @@ func (ns NodeState) selectSupply(id uint64) bool {
 }
 
 func (ns NodeState) proposeDemand(demand api.Demand) {
+	log.Printf("NodeState#proposeDemand[%d] is called\n", demand.Id)
 	ns.ProposedDemand = append(ns.ProposedDemand, demand)
 }
 
 func (ns NodeState) selectDemand(id uint64) bool {
+	log.Printf("NodeState#selectDemand[%d] is called\n", id)
 
 	pos := -1
 	for i := 0; i < len(ns.ProposedDemand); i++ {
@@ -132,7 +138,7 @@ func (ns NodeState) selectDemand(id uint64) bool {
 		ns.ProposedDemand = append(ns.ProposedDemand[:pos], ns.ProposedDemand[pos+1:]...)
 		return true
 	} else {
-		log.Printf("not found demand[%d]\n", id)
+		log.Printf("not found supply[%d]\n", id)
 
 		return false
 	}
@@ -240,6 +246,8 @@ func startKeepAliveAndProc(fn func()) {
 			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
 				reconnectNodeServ()
 			} else if resp.Command == nodeapi.KeepAliveCommand_SERVER_CHANGE {
+				log.Printf("receive SERVER_CHANGE\n")
+
 				if nodeState.isSafeState() {
 					UnRegisterNode()
 					if fn != nil {
