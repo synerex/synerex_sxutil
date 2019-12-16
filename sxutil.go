@@ -250,6 +250,11 @@ func startKeepAliveAndProc(fn func()) {
 
 				if nodeState.isSafeState() {
 					UnRegisterNode()
+
+					if conn != nil {
+						conn.Close()
+					}
+					
 					if fn != nil {
 						fn()
 						nodeState.init()
