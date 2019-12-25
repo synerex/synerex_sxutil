@@ -181,6 +181,7 @@ func reconnectNodeServ() error { // re_send connection info to server.
 		NodeType:         myNodeType,
 		ServerInfo:       myServerInfo,             // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
+		WithNodeId: nid.NodeId,
 	}
 	var ee error
 	nid, ee = clt.RegisterNode(context.Background(), &nif)
@@ -254,7 +255,7 @@ func startKeepAliveAndProc(fn func()) {
 					if conn != nil {
 						conn.Close()
 					}
-					
+
 					if fn != nil {
 						fn()
 						nodeState.init()
@@ -298,6 +299,14 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 
 	clt = nodeapi.NewNodeClient(conn)
 	var nif nodeapi.NodeInfo
+	var nodeId int32
+
+	if nid == nil {
+		nodeId = -1 // initial registration
+	} else {
+		nodeId = nid.NodeId
+	}
+
 	if serv == nil {
 		myNodeType = nodeapi.NodeType_PROVIDER
 		nif = nodeapi.NodeInfo{
@@ -305,7 +314,7 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 			NodeType:         myNodeType,
 			ServerInfo:       "",
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
-			WithNodeId:       -1,                       // initial registration
+			WithNodeId:       nodeId,
 			ClusterId:        0,                        // default cluster
 			AreaId:           "Default",                //default area
 			ChannelTypes:     channels,                 // channel types
@@ -318,7 +327,7 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 			NodeType:         myNodeType,
 			ServerInfo:       myServerInfo,
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
-			WithNodeId:       -1,                       // initial registration
+			WithNodeId:       nodeId,
 			ClusterId:        serv.ClusterId,           // default cluster
 			AreaId:           serv.AreaId,              //default area
 			ChannelTypes:     channels,                 // channel types
