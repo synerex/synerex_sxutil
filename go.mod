@@ -10,7 +10,7 @@ require (
 	github.com/shirou/gopsutil v2.19.11+incompatible
 	github.com/synerex/synerex_api v0.2.1
 	github.com/synerex/synerex_nodeapi v0.4.6
-	github.com/synerex/synerex_proto v0.1.4
+	github.com/synerex/synerex_proto v0.1.6
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
 	golang.org/x/sys v0.0.0-20191228213918-04cbcbbfeed8 // indirect
 	google.golang.org/genproto v0.0.0-20191223191004-3caeed10a8bf // indirect

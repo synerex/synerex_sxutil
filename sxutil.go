@@ -71,7 +71,7 @@ type SxServerOpt struct {
 type NodeState struct {
 	ProposedSupply []api.Supply
 	ProposedDemand []api.Demand
-	Locked bool
+	Locked         bool
 }
 
 func NewNodeState() *NodeState {
@@ -104,7 +104,7 @@ func (ns NodeState) selectSupply(id uint64) bool {
 
 	pos := -1
 	for i := 0; i < len(ns.ProposedSupply); i++ {
-		if ns.ProposedSupply[i].Id == id	{
+		if ns.ProposedSupply[i].Id == id {
 			pos = i
 		}
 	}
@@ -181,7 +181,7 @@ func reconnectNodeServ() error { // re_send connection info to server.
 		NodeType:         myNodeType,
 		ServerInfo:       myServerInfo,             // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
-		WithNodeId: nid.NodeId,
+		WithNodeId:       nid.NodeId,
 	}
 	var ee error
 	nid, ee = clt.RegisterNode(context.Background(), &nif)
@@ -315,9 +315,9 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 			ServerInfo:       "",
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 			WithNodeId:       nodeId,
-			ClusterId:        0,                        // default cluster
-			AreaId:           "Default",                //default area
-			ChannelTypes:     channels,                 // channel types
+			ClusterId:        0,         // default cluster
+			AreaId:           "Default", //default area
+			ChannelTypes:     channels,  // channel types
 		}
 	} else {
 		myNodeType = serv.NodeType
@@ -328,9 +328,9 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 			ServerInfo:       myServerInfo,
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 			WithNodeId:       nodeId,
-			ClusterId:        serv.ClusterId,           // default cluster
-			AreaId:           serv.AreaId,              //default area
-			ChannelTypes:     channels,                 // channel types
+			ClusterId:        serv.ClusterId, // default cluster
+			AreaId:           serv.AreaId,    //default area
+			ChannelTypes:     channels,       // channel types
 			GwInfo:           serv.GwInfo,
 		}
 	}
@@ -537,7 +537,7 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 			}
 			break
 		}
-		log.Println("Receive SS:", *sp)
+		//		log.Println("Receive SS:", *sp)
 
 		if !nodeState.Locked {
 			spcb(clt, sp)
@@ -567,7 +567,7 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 			}
 			break
 		}
-		log.Println("Receive SD:",*dm)
+		//	log.Println("Receive SD:",*dm)
 
 		// call Callback!
 		if !nodeState.Locked {
