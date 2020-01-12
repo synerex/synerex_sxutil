@@ -243,7 +243,7 @@ func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 		if err != nil {
 			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
 		}
-		if resp != nil && !resp.Ok { // there might be some errors in response
+		if resp != nil  { // there might be some errors in response
 			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
 				reconnectNodeServ()
 			} else if resp.Command == nodeapi.KeepAliveCommand_SERVER_CHANGE {
