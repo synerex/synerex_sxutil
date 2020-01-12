@@ -212,10 +212,10 @@ func reconnectNodeServ() error { // re_send connection info to server.
 
 // for simple keepalive
 func startKeepAlive() {
-	startKeepAliveAndProc(nil)
+	startKeepAliveWithCmd(nil)
 }
 
-func startKeepAliveAndProc(fn func()) {
+func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 	for {
 		msgCount = 0 // how count message?
 		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
@@ -256,8 +256,8 @@ func startKeepAliveAndProc(fn func()) {
 						conn.Close()
 					}
 
-					if fn != nil {
-						fn()
+					if cmd_func != nil {
+						cmd_func(resp.Command, resp.Err)
 						nodeState.init()
 					}
 				} else {
@@ -358,7 +358,7 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 		NodeArg:     "",
 	}
 	// start keepalive goroutine
-	go startKeepAliveAndProc(fn)
+	go startKeepAliveWithProc(fn)
 	//	fmt.Println("KeepAlive started!")
 	return nid.ServerInfo, nil
 }
