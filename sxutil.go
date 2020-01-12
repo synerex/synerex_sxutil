@@ -283,10 +283,10 @@ func MsgCountUp() {
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
-	return RegisterNodeAndProc(nodesrv, nm, channels, serv, nil)
+	return RegisterNodeWithCmd(nodesrv, nm, channels, serv, nil)
 }
 
-func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, fn func()) (string, error) { // register ID to server
+func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand,string)) (string, error) { // register ID to server
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // insecure
 	var err error
@@ -358,7 +358,7 @@ func RegisterNodeAndProc(nodesrv string, nm string, channels []uint32, serv *SxS
 		NodeArg:     "",
 	}
 	// start keepalive goroutine
-	go startKeepAliveWithProc(fn)
+	go startKeepAliveWithCmd(cmd_func)
 	//	fmt.Println("KeepAlive started!")
 	return nid.ServerInfo, nil
 }
