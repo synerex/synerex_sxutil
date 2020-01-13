@@ -26,6 +26,7 @@ import (
 // IDType for all ID in Synerex
 type IDType uint64
 
+/* remove Global variables 2020/01
 var (
 	node         *snowflake.Node // package variable for keeping unique ID.
 	nid          *nodeapi.NodeID
@@ -39,8 +40,26 @@ var (
 	msgCount     uint64
 	nodeState    = NewNodeState()
 )
+*/
 
 const WAIT_TIME = 30
+
+// NodeservInfo is a connection info for each Node Server
+type NodeServInfo struct { // we keep this for each nodeserver.
+	node         *snowflake.Node // package variable for keeping unique ID.
+	nid          *nodeapi.NodeID
+	nupd         *nodeapi.NodeUpdate
+	numu         sync.RWMutex
+	myNodeName   string
+	myServerInfo string
+	myNodeType   nodeapi.NodeType
+	conn         *grpc.ClientConn
+	clt          nodeapi.NodeClient
+	msgCount     uint64
+	nodeState    *NodeState
+}
+
+var defaultNI *NodeServInfo
 
 // DemandOpts is sender options for Demand
 type DemandOpts struct {
@@ -89,8 +108,7 @@ func (ns NodeState) init() {
 }
 
 func (ns NodeState) isSafeState() bool {
-	log.Printf("NodeState#isSafeState is called[%v]", nodeState)
-
+	log.Printf("NodeState#isSafeState is called[%v]", ns)
 	return len(ns.ProposedSupply) == 0 && len(ns.ProposedDemand) == 0
 }
 
@@ -146,12 +164,26 @@ func (ns NodeState) selectDemand(id uint64) bool {
 
 func init() {
 	fmt.Println("Synergic Exchange Util init() is called!")
+	defaultNI = NewNodeServInfo()
 }
+
+// GetDefaultNodeServInfo returns Default NodeServ Info for sxutil
+func GetDefaultNodeServInfo() *NodeServInfo{
+	return defaultNI
+}
+
+// NewNodeServInfo returns new NodeServ Info for sxutil
+func NewNodeServInfo() *NodeServInfo {
+	return &NodeServInfo{
+		nodeState: NewNodeState(),
+	}
+}
+
 
 // InitNodeNum for initialize NodeNum again
 func InitNodeNum(n int) {
 	var err error
-	node, err = snowflake.NewNode(int64(n))
+	defaultNI.node, err = snowflake.NewNode(int64(n))
 	if err != nil {
 		log.Println("Error in initializing snowflake:", err)
 	} else {
@@ -159,49 +191,68 @@ func InitNodeNum(n int) {
 	}
 }
 
+// GetNodeName returns node name from node_id
+func (ni *NodeServInfo) GetNodeName(n int) string {
+	nid, err := ni.clt.QueryNode(context.Background(), &nodeapi.NodeID{NodeId: int32(n)})
+	if err != nil {
+		log.Printf("Error on QueryNode %v", err)
+		return "Unknown"
+	}
+	return nid.NodeName
+}
+
+/*
 func GetNodeName(n int) string {
-	ni, err := clt.QueryNode(context.Background(), &nodeapi.NodeID{NodeId: int32(n)})
+	ni, err := defaultNI.clt.QueryNode(context.Background(), &nodeapi.NodeID{NodeId: int32(n)})
 	if err != nil {
 		log.Printf("Error on QueryNode %v", err)
 		return "Unknown"
 	}
 	return ni.NodeName
 }
+*/
 
-func SetNodeStatus(status int32, arg string) {
-	numu.Lock()
-	nupd.NodeStatus = status
-	nupd.NodeArg = arg
-	numu.Unlock()
+// SetNodeStatus updates KeepAlive info to NodeServer
+func (ni *NodeServInfo) SetNodeStatus(status int32, arg string) {
+	ni.numu.Lock()
+	ni.nupd.NodeStatus = status
+	ni.nupd.NodeArg = arg
+	ni.numu.Unlock()
 }
 
-func reconnectNodeServ() error { // re_send connection info to server.
+// SetNodeStatus updates KeepAlive info to NodeServer
+func SetNodeStatus(status int32, arg string) {
+	defaultNI.SetNodeStatus(status,arg)
+}
+
+
+func (ni *NodeServInfo )reconnectNodeServ() error { // re_send connection info to server.
 	nif := nodeapi.NodeInfo{
-		NodeName:         myNodeName,
-		NodeType:         myNodeType,
-		ServerInfo:       myServerInfo,             // TODO: this is not correctly initialized
+		NodeName:         ni.myNodeName,
+		NodeType:         ni.myNodeType,
+		ServerInfo:       ni.myServerInfo,             // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
-		WithNodeId:       nid.NodeId,
+		WithNodeId:       ni.nid.NodeId,
 	}
 	var ee error
-	nid, ee = clt.RegisterNode(context.Background(), &nif)
+	ni.nid, ee = ni.clt.RegisterNode(context.Background(), &nif)
 	if ee != nil { // has error!
 		log.Println("Error on get NodeID", ee)
 		return ee
 	} else {
 		var nderr error
-		node, nderr = snowflake.NewNode(int64(nid.NodeId))
+		ni.node, nderr = snowflake.NewNode(int64(ni.nid.NodeId))
 		if nderr != nil {
 			log.Println("Error in initializing snowflake:", nderr)
 			return nderr
 		} else {
-			log.Println("Successfully ReInitialize node ", nid.NodeId)
+			log.Println("Successfully ReInitialize node ", ni.nid.NodeId)
 		}
 	}
 
-	nupd = &nodeapi.NodeUpdate{
-		NodeId:      nid.NodeId,
-		Secret:      nid.Secret,
+	ni.nupd = &nodeapi.NodeUpdate{
+		NodeId:      ni.nid.NodeId,
+		Secret:      ni.nid.Secret,
 		UpdateCount: 0,
 		NodeStatus:  0,
 		NodeArg:     "",
@@ -211,72 +262,72 @@ func reconnectNodeServ() error { // re_send connection info to server.
 }
 
 // for simple keepalive
-func startKeepAlive() {
-	startKeepAliveWithCmd(nil)
-}
+//func startKeepAlive() {/
+//	defaultNI.startKeepAliveWithCmd(nil)
+//}
 
-func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
+func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 	for {
-		msgCount = 0 // how count message?
+		ni.msgCount = 0 // how count message?
 		//		fmt.Printf("KeepAlive %s %d\n",nupd.NodeStatus, nid.KeepaliveDuration)
-		time.Sleep(time.Second * time.Duration(nid.KeepaliveDuration))
-		if nid.Secret == 0 { // this means the node is disconnected
+		time.Sleep(time.Second * time.Duration(ni.nid.KeepaliveDuration))
+		if ni.nid.Secret == 0 { // this means the node is disconnected
 			break
 		}
 
-		if myNodeType == nodeapi.NodeType_SERVER {
+		if ni.myNodeType == nodeapi.NodeType_SERVER {
 			c, _ := cpu.Percent(5, false)
 			v, _ := mem.VirtualMemory()
 			var status nodeapi.ServerStatus
 			status = nodeapi.ServerStatus{
 				Cpu:      c[0],
 				Memory:   v.UsedPercent,
-				MsgCount: msgCount,
+				MsgCount: ni.msgCount,
 			}
-			nupd.Status = &status
+			ni.nupd.Status = &status
 		}
 
-		numu.RLock()
-		nupd.UpdateCount++
-		resp, err := clt.KeepAlive(context.Background(), nupd)
-		numu.RUnlock()
+		ni.numu.RLock()
+		ni.nupd.UpdateCount++
+		resp, err := ni.clt.KeepAlive(context.Background(), ni.nupd)
+		ni.numu.RUnlock()
 		if err != nil {
 			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
 		}
 		if resp != nil  { // there might be some errors in response
 			switch resp.Command {
 			case nodeapi.KeepAliveCommand_RECONNECT: // order is reconnect to node.
-				reconnectNodeServ()
+				ni.reconnectNodeServ()
 			case nodeapi.KeepAliveCommand_SERVER_CHANGE :
 				log.Printf("receive SERVER_CHANGE\n")
 
-				if nodeState.isSafeState() {
-					UnRegisterNode()
+				if ni.nodeState.isSafeState() {
+					ni.UnRegisterNode()
 
-					if conn != nil {
-						conn.Close()
+					if ni.conn != nil {
+						ni.conn.Close()
 					}
 
 					if cmd_func != nil {
 						cmd_func(resp.Command, resp.Err)
-						nodeState.init()
+						ni.nodeState.init()
 					}
 				} else {
 					// wait
-					if !nodeState.Locked {
-						nodeState.Locked = true
+					if !ni.nodeState.Locked {
+						ni.nodeState.Locked = true
 						go func() {
 							t := time.NewTicker(WAIT_TIME * time.Second) // 30 seconds
 							<-t.C
-							nodeState.init()
+							ni.nodeState.init()
 							t.Stop() // タイマを止める。
 						}()
 					}
 				}
 			case nodeapi.KeepAliveCommand_PROVIDER_DISCONNECT:
 				log.Printf("receive PROV_DISCONN %s\n",  resp.Err)
-				if myNodeType != nodeapi.NodeType_SERVER {
-					log.Printf("NodeType shoud be SERVER! %d %s %#v", myNodeType, myNodeName, resp)
+				if ni.myNodeType != nodeapi.NodeType_SERVER {
+					log.Printf("NodeType shoud be SERVER! %d %s %#v", ni.myNodeType, ni.myNodeName, resp)
 				} else if cmd_func != nil {
 					// work provider disconnect
 					cmd_func(resp.Command, resp.Err)
@@ -286,41 +337,53 @@ func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 	}
 }
 
-func MsgCountUp() {
-	msgCount++
+func (ni *NodeServInfo) MsgCountUp() {
+	ni.msgCount++
 }
+
+
+func MsgCountUp() { // is this needed?
+	defaultNI.MsgCountUp()
+}
+
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
 	return RegisterNodeWithCmd(nodesrv, nm, channels, serv, nil)
 }
 
+// RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
 func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand,string)) (string, error) { // register ID to server
+	return defaultNI.RegisterNodeWithCmd(nodesrv, nm, channels, serv, cmd_func)
+}
+
+// RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
+func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand,string)) (string, error) { // register ID to server
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // insecure
 	var err error
-	conn, err = grpc.Dial(nodesrv, opts...)
+	ni.conn, err = grpc.Dial(nodesrv, opts...)
 	if err != nil {
 		log.Printf("fail to dial: %v", err)
 		return "", err
 	}
 	//	defer conn.Close()
 
-	clt = nodeapi.NewNodeClient(conn)
+	ni.clt = nodeapi.NewNodeClient(ni.conn)
 	var nif nodeapi.NodeInfo
 	var nodeId int32
 
-	if nid == nil {
+	if ni.nid == nil {
 		nodeId = -1 // initial registration
 	} else {
-		nodeId = nid.NodeId
+		nodeId = ni.nid.NodeId
 	}
 
 	if serv == nil {
-		myNodeType = nodeapi.NodeType_PROVIDER
+		ni.myNodeType = nodeapi.NodeType_PROVIDER
 		nif = nodeapi.NodeInfo{
 			NodeName:         nm,
-			NodeType:         myNodeType,
+			NodeType:         ni.myNodeType,
 			ServerInfo:       "",
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 			WithNodeId:       nodeId,
@@ -329,12 +392,12 @@ func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxS
 			ChannelTypes:     channels,  // channel types
 		}
 	} else {
-		myNodeType = serv.NodeType
-		myServerInfo = serv.ServerInfo
+		ni.myNodeType = serv.NodeType
+		ni.myServerInfo = serv.ServerInfo
 		nif = nodeapi.NodeInfo{
 			NodeName:         nm,
-			NodeType:         myNodeType,
-			ServerInfo:       myServerInfo,
+			NodeType:         ni.myNodeType,
+			ServerInfo:       ni.myServerInfo,
 			NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 			WithNodeId:       nodeId,
 			ClusterId:        serv.ClusterId, // default cluster
@@ -343,40 +406,46 @@ func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxS
 			GwInfo:           serv.GwInfo,
 		}
 	}
-	myNodeName = nm
+	ni.myNodeName = nm
 	var ee error
-	nid, ee = clt.RegisterNode(context.Background(), &nif)
+	ni.nid, ee = ni.clt.RegisterNode(context.Background(), &nif)
 	if ee != nil { // has error!
 		log.Println("Error on get NodeID", ee)
 		return "", ee
 	} else {
 		var nderr error
-		node, nderr = snowflake.NewNode(int64(nid.NodeId))
+		ni.node, nderr = snowflake.NewNode(int64(ni.nid.NodeId))
 		if nderr != nil {
 			log.Println("Error in initializing snowflake:", err)
 			return "", nderr
 		} else {
-			log.Println("Successfully ReInitialize node ", nid.NodeId)
+			log.Println("Successfully ReInitialize node ", ni.nid.NodeId)
 		}
 	}
-	nupd = &nodeapi.NodeUpdate{
-		NodeId:      nid.NodeId,
-		Secret:      nid.Secret,
+	ni.nupd = &nodeapi.NodeUpdate{
+		NodeId:      ni.nid.NodeId,
+		Secret:      ni.nid.Secret,
 		UpdateCount: 0,
 		NodeStatus:  0,
 		NodeArg:     "",
 	}
 	// start keepalive goroutine
-	go startKeepAliveWithCmd(cmd_func)
+	go ni.startKeepAliveWithCmd(cmd_func)
 	//	fmt.Println("KeepAlive started!")
-	return nid.ServerInfo, nil
+	return ni.nid.ServerInfo, nil
 }
 
 // UnRegisterNode de-registrate node id
 func UnRegisterNode() {
-	log.Println("UnRegister Node ", nid)
-	resp, err := clt.UnRegisterNode(context.Background(), nid)
-	nid.Secret = 0
+	defaultNI.UnRegisterNode()
+}
+
+
+// UnRegisterNode de-registrate node id
+func (ni *NodeServInfo) UnRegisterNode() {
+	log.Println("UnRegister Node ", ni.nid)
+	resp, err := ni.clt.UnRegisterNode(context.Background(), ni.nid)
+	ni.nid.Secret = 0
 	if err != nil || !resp.Ok {
 		log.Print("Can't unregister", err, resp)
 	}
@@ -389,9 +458,10 @@ type SXServiceClient struct {
 	Client      api.SynerexClient
 	ArgJson     string
 	MbusID      IDType
+	NI          *NodeServInfo
 }
 
-// Utility Function for Conneting gRPC server
+// GrpcConnectServer is a utility function for conneting gRPC server
 func GrpcConnectServer(serverAddress string) api.SynerexClient { // TODO: we may add connection option
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // currently we do not use sercure connection //TODO: we need to udpate SSL
@@ -405,18 +475,29 @@ func GrpcConnectServer(serverAddress string) api.SynerexClient { // TODO: we may
 
 // NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
 func NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
+	return defaultNI.NewSXServiceClient(clt, mtype, argJson)
+}
+
+// NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
+func (ni *NodeServInfo) NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
 	s := &SXServiceClient{
-		ClientID:    IDType(node.Generate()),
+		ClientID:    IDType(ni.node.Generate()),
 		ChannelType: mtype,
 		Client:      clt,
 		ArgJson:     argJson,
+		NI: ni,
 	}
 	return s
 }
 
 // GenerateIntID for generate uniquie ID
 func GenerateIntID() uint64 {
-	return uint64(node.Generate())
+	return defaultNI.GenerateIntID()
+}
+
+// GenerateIntID for generate uniquie ID
+func (ni *NodeServInfo)GenerateIntID() uint64 {
+	return uint64(ni.node.Generate())
 }
 
 func (clt SXServiceClient) getChannel() *api.Channel {
@@ -472,7 +553,7 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 	}
 	//	log.Println("ProposeSupply Response:", resp, ":PID ",pid)
 
-	nodeState.proposeSupply(*sp)
+	clt.NI.nodeState.proposeSupply(*sp)
 
 	return pid
 }
@@ -500,7 +581,7 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 		//		clt.SubscribeMbus()
 	}
 
-	nodeState.selectSupply(sp.Id)
+	clt.NI.nodeState.selectSupply(sp.Id)
 
 	return uint64(clt.MbusID), nil
 }
@@ -522,7 +603,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 	}
 	//	log.Println("SelectDemand Response:", resp)
 
-	nodeState.selectDemand(dm.Id)
+	clt.NI.nodeState.selectDemand(dm.Id)
 
 	return nil
 }
@@ -548,7 +629,7 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 		}
 		//		log.Println("Receive SS:", *sp)
 
-		if !nodeState.Locked {
+		if !clt.NI.nodeState.Locked {
 			spcb(clt, sp)
 		} else {
 			log.Println("Provider is locked!")
@@ -579,7 +660,7 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 		//	log.Println("Receive SD:",*dm)
 
 		// call Callback!
-		if !nodeState.Locked {
+		if !clt.NI.nodeState.Locked {
 			dmcb(clt, dm)
 		} else {
 			log.Println("Provider is locked!")
@@ -724,8 +805,8 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 	clt.MbusID = id
 	//	log.Println("Confirm Success:", resp)
 
-	nodeState.selectDemand(uint64(id))
-	nodeState.selectSupply(uint64(id))
+	clt.NI.nodeState.selectDemand(uint64(id))
+	clt.NI.nodeState.selectSupply(uint64(id))
 
 	return nil
 }
