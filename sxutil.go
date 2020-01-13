@@ -244,9 +244,10 @@ func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
 		}
 		if resp != nil  { // there might be some errors in response
-			if resp.Command == nodeapi.KeepAliveCommand_RECONNECT { // order is reconnect to node.
+			switch resp.Command {
+			case nodeapi.KeepAliveCommand_RECONNECT: // order is reconnect to node.
 				reconnectNodeServ()
-			} else if resp.Command == nodeapi.KeepAliveCommand_SERVER_CHANGE {
+			case nodeapi.KeepAliveCommand_SERVER_CHANGE :
 				log.Printf("receive SERVER_CHANGE\n")
 
 				if nodeState.isSafeState() {
@@ -271,6 +272,13 @@ func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 							t.Stop() // タイマを止める。
 						}()
 					}
+				}
+			case nodeapi.KeeKeepAliveCommand_PROVIDER_DISCONNECT:
+				log.Printf("receive PROV_DISCONN %s\n",  resp.Err)
+				if myNodeType == nodeapi.NodeType_SERVER {
+					log.Printf("NodeType shoud be SERVER! %d %s %#v", myNodeType, myNodeName, resp)
+				} else if cmd_func != nil {
+					cmd_func(resp.Command, resp.Err)
 				}
 			}
 		}
