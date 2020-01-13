@@ -273,7 +273,7 @@ func startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCommand, string)) {
 						}()
 					}
 				}
-			case nodeapi.KeeKeepAliveCommand_PROVIDER_DISCONNECT:
+			case nodeapi.KeepAliveCommand_PROVIDER_DISCONNECT:
 				log.Printf("receive PROV_DISCONN %s\n",  resp.Err)
 				if myNodeType == nodeapi.NodeType_SERVER {
 					log.Printf("NodeType shoud be SERVER! %d %s %#v", myNodeType, myNodeName, resp)
