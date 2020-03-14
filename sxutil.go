@@ -238,6 +238,7 @@ func (ni *NodeServInfo) reconnectNodeServ() error { // re_send connection info t
 		ServerInfo:       ni.myServerInfo,          // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 		WithNodeId:       ni.nid.NodeId,
+		BinVersion:       GitVer, // git bin tag version
 	}
 	var ee error
 	ni.nid, ee = ni.clt.RegisterNode(context.Background(), &nif)
@@ -297,7 +298,7 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 		resp, err := ni.clt.KeepAlive(context.Background(), ni.nupd)
 		ni.numu.RUnlock()
 		if err != nil {
-			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
+			log.Printf("Error in response, may nodeserv failure %v:%v", resp, err)
 		}
 		if resp != nil { // there might be some errors in response
 			switch resp.Command {
