@@ -44,6 +44,13 @@ var (
 
 const WAIT_TIME = 30
 
+// for git versions
+var (
+	Sha1Ver   string // sha1 version used to build the program
+	BuildTime string // when the executable was built
+	GitVer    string // git release tag
+)
+
 // NodeservInfo is a connection info for each Node Server
 type NodeServInfo struct { // we keep this for each nodeserver.
 	node         *snowflake.Node // package variable for keeping unique ID.
@@ -168,7 +175,7 @@ func init() {
 }
 
 // GetDefaultNodeServInfo returns Default NodeServ Info for sxutil
-func GetDefaultNodeServInfo() *NodeServInfo{
+func GetDefaultNodeServInfo() *NodeServInfo {
 	return defaultNI
 }
 
@@ -178,7 +185,6 @@ func NewNodeServInfo() *NodeServInfo {
 		nodeState: NewNodeState(),
 	}
 }
-
 
 // InitNodeNum for initialize NodeNum again
 func InitNodeNum(n int) {
@@ -222,15 +228,14 @@ func (ni *NodeServInfo) SetNodeStatus(status int32, arg string) {
 
 // SetNodeStatus updates KeepAlive info to NodeServer
 func SetNodeStatus(status int32, arg string) {
-	defaultNI.SetNodeStatus(status,arg)
+	defaultNI.SetNodeStatus(status, arg)
 }
 
-
-func (ni *NodeServInfo )reconnectNodeServ() error { // re_send connection info to server.
+func (ni *NodeServInfo) reconnectNodeServ() error { // re_send connection info to server.
 	nif := nodeapi.NodeInfo{
 		NodeName:         ni.myNodeName,
 		NodeType:         ni.myNodeType,
-		ServerInfo:       ni.myServerInfo,             // TODO: this is not correctly initialized
+		ServerInfo:       ni.myServerInfo,          // TODO: this is not correctly initialized
 		NodePbaseVersion: pbase.ChannelTypeVersion, // this is defined at compile time
 		WithNodeId:       ni.nid.NodeId,
 	}
@@ -294,11 +299,11 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 		if err != nil {
 			log.Printf("Error in response, may nodeserv failuer %v:%v", resp, err)
 		}
-		if resp != nil  { // there might be some errors in response
+		if resp != nil { // there might be some errors in response
 			switch resp.Command {
 			case nodeapi.KeepAliveCommand_RECONNECT: // order is reconnect to node.
 				ni.reconnectNodeServ()
-			case nodeapi.KeepAliveCommand_SERVER_CHANGE :
+			case nodeapi.KeepAliveCommand_SERVER_CHANGE:
 				log.Printf("receive SERVER_CHANGE\n")
 
 				if ni.nodeState.isSafeState() {
@@ -325,7 +330,7 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 					}
 				}
 			case nodeapi.KeepAliveCommand_PROVIDER_DISCONNECT:
-				log.Printf("receive PROV_DISCONN %s\n",  resp.Err)
+				log.Printf("receive PROV_DISCONN %s\n", resp.Err)
 				if ni.myNodeType != nodeapi.NodeType_SERVER {
 					log.Printf("NodeType shoud be SERVER! %d %s %#v", ni.myNodeType, ni.myNodeName, resp)
 				} else if cmd_func != nil {
@@ -341,11 +346,9 @@ func (ni *NodeServInfo) MsgCountUp() {
 	ni.msgCount++
 }
 
-
 func MsgCountUp() { // is this needed?
 	defaultNI.MsgCountUp()
 }
-
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
@@ -353,12 +356,12 @@ func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOp
 }
 
 // RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
-func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand,string)) (string, error) { // register ID to server
+func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
 	return defaultNI.RegisterNodeWithCmd(nodesrv, nm, channels, serv, cmd_func)
 }
 
 // RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
-func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand,string)) (string, error) { // register ID to server
+func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // insecure
 	var err error
@@ -390,6 +393,8 @@ func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels 
 			ClusterId:        0,         // default cluster
 			AreaId:           "Default", //default area
 			ChannelTypes:     channels,  // channel types
+			BinVersion:       GitVer,    // git bin tag version
+
 		}
 	} else {
 		ni.myNodeType = serv.NodeType
@@ -404,6 +409,7 @@ func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels 
 			AreaId:           serv.AreaId,    //default area
 			ChannelTypes:     channels,       // channel types
 			GwInfo:           serv.GwInfo,
+			BinVersion:       GitVer, // git bin tag version
 		}
 	}
 	ni.myNodeName = nm
@@ -439,7 +445,6 @@ func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels 
 func UnRegisterNode() {
 	defaultNI.UnRegisterNode()
 }
-
 
 // UnRegisterNode de-registrate node id
 func (ni *NodeServInfo) UnRegisterNode() {
@@ -485,7 +490,7 @@ func (ni *NodeServInfo) NewSXServiceClient(clt api.SynerexClient, mtype uint32, 
 		ChannelType: mtype,
 		Client:      clt,
 		ArgJson:     argJson,
-		NI: ni,
+		NI:          ni,
 	}
 	return s
 }
@@ -496,7 +501,7 @@ func GenerateIntID() uint64 {
 }
 
 // GenerateIntID for generate uniquie ID
-func (ni *NodeServInfo)GenerateIntID() uint64 {
+func (ni *NodeServInfo) GenerateIntID() uint64 {
 	return uint64(ni.node.Generate())
 }
 
