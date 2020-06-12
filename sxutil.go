@@ -3,7 +3,6 @@ package sxutil // import "github.com/synerex/synerex_sxutil"
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -103,8 +102,7 @@ type NodeState struct {
 func NewNodeState() *NodeState {
 	obj := new(NodeState)
 	obj.init()
-
-	log.Println("Initializing NodeState")
+	//	log.Println("Initializing NodeState")
 	return obj
 }
 
@@ -115,7 +113,7 @@ func (ns NodeState) init() {
 }
 
 func (ns NodeState) isSafeState() bool {
-	log.Printf("NodeState#isSafeState is called[%v]", ns)
+	//	log.Printf("NodeState#isSafeState is called[%v]", ns)
 	return len(ns.ProposedSupply) == 0 && len(ns.ProposedDemand) == 0
 }
 
@@ -170,7 +168,7 @@ func (ns NodeState) selectDemand(id uint64) bool {
 }
 
 func init() {
-	fmt.Println("Synergic Exchange Util init() is called!")
+	//	fmt.Println("Synergic Exchange Util init() is called!")
 	defaultNI = NewNodeServInfo()
 }
 
