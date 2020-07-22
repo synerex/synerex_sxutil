@@ -704,16 +704,31 @@ func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServ
 	return err
 }
 
-func (clt *SXServiceClient) SendMsg(ctx context.Context, msg *api.MbusMsg) error {
+// v0.4.1 name change
+func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) error {
 	if clt.MbusID == 0 {
 		return errors.New("No Mbus opened!")
 	}
 	msg.MsgId = GenerateIntID()
 	msg.SenderId = uint64(clt.ClientID)
 	msg.MbusId = uint64(clt.MbusID)
-	_, err := clt.Client.SendMsg(ctx, msg)
+	//TODO: need to check response
+	_, err := clt.Client.SendMbusMsg(ctx, msg)
 
 	return err
+}
+
+// from synerex_api v0.4.0
+func (clt *SXServiceClient) CreateMbus(ctx context.Context, opt *api.MbusOpt) (*api.Mbus, error) {
+	mbus, err := clt.Client.CreateMbus(ctx, opt)
+	mbus.ClientId = uint64(clt.ClientID) // set by myself for future use.
+	return mbus, err
+}
+
+// from synerex_api v0.4.0
+func (clt *SXServiceClient) GetMbusStatus(ctx context.Context, mb *api.Mbus) (*api.MbusState, error) {
+	mbs, err := clt.Client.GetMbusState(ctx, mb)
+	return mbs, err
 }
 
 func (clt *SXServiceClient) CloseMbus(ctx context.Context) error {
