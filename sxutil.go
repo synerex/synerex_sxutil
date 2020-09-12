@@ -455,18 +455,24 @@ func (ni *NodeServInfo) UnRegisterNode() {
 	}
 }
 
-// SXServiceClient Wrappter Structure for market client
+// SXSynerexClient is for each server from v0.5.0
+type SXSynerexClient struct {
+	ServerAddress string
+	Client        api.SynerexClient
+}
+
+// SXServiceClient Wrappter Structure for synerex client
 type SXServiceClient struct {
 	ClientID    IDType
 	ChannelType uint32
-	Client      api.SynerexClient
+	SXClient    *SXSynerexClient
 	ArgJson     string
 	MbusID      IDType
 	NI          *NodeServInfo
 }
 
 // GrpcConnectServer is a utility function for conneting gRPC server
-func GrpcConnectServer(serverAddress string) api.SynerexClient { // TODO: we may add connection option
+func GrpcConnectServer(serverAddress string) *SXSynerexClient { // TODO: we may add connection option
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // currently we do not use sercure connection //TODO: we need to udpate SSL
 	conn, err := grpc.Dial(serverAddress, opts...)
@@ -474,20 +480,24 @@ func GrpcConnectServer(serverAddress string) api.SynerexClient { // TODO: we may
 		log.Printf("fail to connect server %s: %v", serverAddress, err)
 		return nil
 	}
-	return api.NewSynerexClient(conn)
+	// from v0.5.0 , we support Connection in sxutil.
+	return &SXSynerexClient{
+		ServerAddress: serverAddress,
+		Client:        api.NewSynerexClient(conn),
+	}
 }
 
 // NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
-func NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
+func NewSXServiceClient(clt *SXSynerexClient, mtype uint32, argJson string) *SXServiceClient {
 	return defaultNI.NewSXServiceClient(clt, mtype, argJson)
 }
 
 // NewSXServiceClient Creates wrapper structre SXServiceClient from SynerexClient
-func (ni *NodeServInfo) NewSXServiceClient(clt api.SynerexClient, mtype uint32, argJson string) *SXServiceClient {
+func (ni *NodeServInfo) NewSXServiceClient(clt *SXSynerexClient, mtype uint32, argJson string) *SXServiceClient {
 	s := &SXServiceClient{
 		ClientID:    IDType(ni.node.Generate()),
 		ChannelType: mtype,
-		Client:      clt,
+		SXClient:    clt,
 		ArgJson:     argJson,
 		NI:          ni,
 	}
@@ -550,7 +560,7 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := clt.Client.ProposeSupply(ctx, sp)
+	_, err := clt.SXClient.Client.ProposeSupply(ctx, sp)
 	if err != nil {
 		log.Printf("%v.ProposeSupply err %v, [%v]", clt, err, sp)
 		return 0 // should check...
@@ -572,7 +582,7 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := clt.Client.SelectSupply(ctx, tgt)
+	resp, err := clt.SXClient.Client.SelectSupply(ctx, tgt)
 	if err != nil {
 		log.Printf("%v.SelectSupply err %v %v", clt, err, resp)
 		return 0, err
@@ -600,7 +610,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := clt.Client.SelectDemand(ctx, tgt)
+	resp, err := clt.SXClient.Client.SelectDemand(ctx, tgt)
 	if err != nil {
 		log.Printf("%v.SelectDemand err %v %v", clt, err, resp)
 		return err
@@ -615,7 +625,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 // SubscribeSupply  Wrapper function for SXServiceClient
 func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXServiceClient, *api.Supply)) error {
 	ch := clt.getChannel()
-	smc, err := clt.Client.SubscribeSupply(ctx, ch)
+	smc, err := clt.SXClient.Client.SubscribeSupply(ctx, ch)
 	if err != nil {
 		log.Printf("%v SubscribeSupply Error %v", clt, err)
 		return err
@@ -645,7 +655,7 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 // SubscribeDemand  Wrapper function for SXServiceClient
 func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXServiceClient, *api.Demand)) error {
 	ch := clt.getChannel()
-	dmc, err := clt.Client.SubscribeDemand(ctx, ch)
+	dmc, err := clt.SXClient.Client.SubscribeDemand(ctx, ch)
 	if err != nil {
 		log.Printf("%v SubscribeDemand Error %v", clt, err)
 		return err // sender should handle error...
@@ -681,7 +691,7 @@ func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServ
 		MbusId:   uint64(clt.MbusID),
 	}
 
-	smc, err := clt.Client.SubscribeMbus(ctx, mb)
+	smc, err := clt.SXClient.Client.SubscribeMbus(ctx, mb)
 	if err != nil {
 		log.Printf("%v Synerex_SubscribeMbusClient Error %v", clt, err)
 		return err // sender should handle error...
@@ -713,21 +723,21 @@ func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) e
 	msg.SenderId = uint64(clt.ClientID)
 	msg.MbusId = uint64(clt.MbusID)
 	//TODO: need to check response
-	_, err := clt.Client.SendMbusMsg(ctx, msg)
+	_, err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
 
 	return err
 }
 
 // from synerex_api v0.4.0
 func (clt *SXServiceClient) CreateMbus(ctx context.Context, opt *api.MbusOpt) (*api.Mbus, error) {
-	mbus, err := clt.Client.CreateMbus(ctx, opt)
+	mbus, err := clt.SXClient.Client.CreateMbus(ctx, opt)
 	mbus.ClientId = uint64(clt.ClientID) // set by myself for future use.
 	return mbus, err
 }
 
 // from synerex_api v0.4.0
 func (clt *SXServiceClient) GetMbusStatus(ctx context.Context, mb *api.Mbus) (*api.MbusState, error) {
-	mbs, err := clt.Client.GetMbusState(ctx, mb)
+	mbs, err := clt.SXClient.Client.GetMbusState(ctx, mb)
 	return mbs, err
 }
 
@@ -739,7 +749,7 @@ func (clt *SXServiceClient) CloseMbus(ctx context.Context) error {
 		ClientId: uint64(clt.ClientID),
 		MbusId:   uint64(clt.MbusID),
 	}
-	_, err := clt.Client.CloseMbus(ctx, mbus)
+	_, err := clt.SXClient.Client.CloseMbus(ctx, mbus)
 	if err == nil {
 		clt.MbusID = 0
 	}
@@ -765,7 +775,7 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := clt.Client.NotifyDemand(ctx, &dm)
+	_, err := clt.SXClient.Client.NotifyDemand(ctx, &dm)
 
 	//	resp, err := clt.Client.NotifyDemand(ctx, &dm)
 	if err != nil {
@@ -795,7 +805,7 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 	defer cancel()
 	//	resp , err := clt.Client.NotifySupply(ctx, &dm)
 
-	_, err := clt.Client.NotifySupply(ctx, &dm)
+	_, err := clt.SXClient.Client.NotifySupply(ctx, &dm)
 	if err != nil {
 		log.Printf("Error for sending:NotifySupply to  Synerex Server as %v ", err)
 		return 0, err
@@ -816,7 +826,7 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := clt.Client.Confirm(ctx, tg)
+	resp, err := clt.SXClient.Client.Confirm(ctx, tg)
 	if err != nil {
 		log.Printf("%v Confirm Failier %v %v", clt, err, resp)
 		return err
@@ -829,3 +839,79 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 
 	return nil
 }
+
+// Simple Robust SubscribeDemand/Supply with ReConnect function. (2020/09~ v0.5.0)
+
+func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
+	mu.Lock()
+	if client.SXClient != nil {
+		client.SXClient = nil
+		log.Printf("Client reset \n")
+	}
+	mu.Unlock()
+	time.Sleep(5 * time.Second) // wait 5 seconds to reconnect
+	mu.Lock()
+	if client.SXClient == nil && servAddr != "" {
+		newClt := GrpcConnectServer(servAddr)
+		if newClt != nil {
+			log.Printf("Reconnect server [%s]\n", servAddr)
+			client.SXClient = newClt
+			return
+		} else {
+			log.Printf("Can't re-connect server..")
+		}
+	} else { // someone may connect!
+		log.Printf("Use reconnected client.. \n")
+	}
+	mu.Unlock()
+}
+
+// Simple Continuous (error free) subscriber for demand
+func SimpleSubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.Demand)) (*sync.Mutex, *bool) {
+	var mu sync.Mutex
+	loopFlag := true
+	go SubscribeDemand(client, dmcb, &mu, &loopFlag) // loop
+	return &mu, &loopFlag
+}
+
+// Continuous (error free) subscriber for demand
+func SubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.Demand), mu *sync.Mutex, loopFlag *bool) {
+	ctx := context.Background() //
+	var servAddr string = ""
+	for *loopFlag { // make it continuously working..
+		client.SubscribeDemand(ctx, dmcb)
+		log.Printf("Error on subscribe.")
+		if client.SXClient == nil {
+			log.Printf("Already reconnect from other loop.")
+		} else {
+			servAddr = client.SXClient.ServerAddress
+		}
+		reconnectClient(client, servAddr, mu)
+	}
+}
+
+// Simple Continuous (error free) subscriber for demand
+func SimpleSubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply)) (*sync.Mutex, *bool) {
+	var mu sync.Mutex
+	loopFlag := true
+	go SubscribeSupply(client, spcb, &mu, &loopFlag) // loop
+	return &mu, &loopFlag
+}
+
+// Continuous (error free) subscriber for demand
+func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply), mu *sync.Mutex, loopFlag *bool) {
+	ctx := context.Background() //
+	var servAddr string = ""
+	for *loopFlag { // make it continuously working..
+		client.SubscribeSupply(ctx, spcb)
+		log.Printf("Error on subscribe.")
+		if client.SXClient == nil {
+			log.Printf("Already reconnect from other loop.")
+		} else {
+			servAddr = client.SXClient.ServerAddress
+		}
+		reconnectClient(client, servAddr, mu)
+	}
+}
+
+// We need to simplify the logic of separate NotifyDemand/SelectSupply
