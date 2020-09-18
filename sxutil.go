@@ -25,22 +25,6 @@ import (
 // IDType for all ID in Synerex
 type IDType uint64
 
-/* remove Global variables 2020/01
-var (
-	node         *snowflake.Node // package variable for keeping unique ID.
-	nid          *nodeapi.NodeID
-	nupd         *nodeapi.NodeUpdate
-	numu         sync.RWMutex
-	myNodeName   string
-	myServerInfo = ""
-	myNodeType   nodeapi.NodeType
-	conn         *grpc.ClientConn
-	clt          nodeapi.NodeClient
-	msgCount     uint64
-	nodeState    = NewNodeState()
-)
-*/
-
 const WAIT_TIME = 30
 
 // for git versions
@@ -63,6 +47,15 @@ type NodeServInfo struct { // we keep this for each nodeserver.
 	clt          nodeapi.NodeClient
 	msgCount     uint64
 	nodeState    *NodeState
+}
+
+type DemandHandler interface {
+	OnNotifyDemand(*SXServiceClient, *api.Demand) *SupplyOpts // if propose return proposedID
+	OnSelectSupply(*SXServiceClient, *api.Demand) bool        // if confirm return true
+	OnConfirmResponse(*SXServiceClient, IDType, error)        // result of confirm
+}
+
+type SupplyHandler interface {
 }
 
 var defaultNI *NodeServInfo
@@ -106,48 +99,55 @@ func NewNodeState() *NodeState {
 	return obj
 }
 
-func (ns NodeState) init() {
+func (ns *NodeState) init() {
 	ns.ProposedSupply = []api.Supply{}
 	ns.ProposedDemand = []api.Demand{}
 	ns.Locked = false
 }
 
-func (ns NodeState) isSafeState() bool {
+func (ns *NodeState) isSafeState() bool {
 	//	log.Printf("NodeState#isSafeState is called[%v]", ns)
 	return len(ns.ProposedSupply) == 0 && len(ns.ProposedDemand) == 0
 }
 
-func (ns NodeState) proposeSupply(supply api.Supply) {
+func (ns *NodeState) proposeSupply(supply api.Supply) {
 	log.Printf("NodeState#proposeSupply[%d] is called", supply.Id)
 	ns.ProposedSupply = append(ns.ProposedSupply, supply)
+	log.Printf("proposeSupply len %d", len(ns.ProposedSupply))
+
 }
 
-func (ns NodeState) selectSupply(id uint64) bool {
-	log.Printf("NodeState#selectSupply[%d] is called\n", id)
-
-	pos := -1
+func (ns *NodeState) proposedSupplyIndex(id uint64) int {
 	for i := 0; i < len(ns.ProposedSupply); i++ {
 		if ns.ProposedSupply[i].Id == id {
-			pos = i
+			return i
 		}
 	}
+	return -1
+}
 
+func (ns *NodeState) removeProposedSupplyIndex(pos int) {
+	ns.ProposedSupply = append(ns.ProposedSupply[:pos], ns.ProposedSupply[pos+1:]...)
+}
+
+func (ns *NodeState) selectSupply(id uint64) bool {
+	//	log.Printf("NodeState#selectSupply[%d] is called\n", id)
+	pos := ns.proposedSupplyIndex(id)
 	if pos >= 0 {
-		ns.ProposedSupply = append(ns.ProposedSupply[:pos], ns.ProposedSupply[pos+1:]...)
+		ns.removeProposedSupplyIndex(pos)
 		return true
 	} else {
 		log.Printf("not found supply[%d]\n", id)
-
 		return false
 	}
 }
 
-func (ns NodeState) proposeDemand(demand api.Demand) {
+func (ns *NodeState) proposeDemand(demand api.Demand) {
 	log.Printf("NodeState#proposeDemand[%d] is called\n", demand.Id)
 	ns.ProposedDemand = append(ns.ProposedDemand, demand)
 }
 
-func (ns NodeState) selectDemand(id uint64) bool {
+func (ns *NodeState) selectDemand(id uint64) bool {
 	log.Printf("NodeState#selectDemand[%d] is called\n", id)
 
 	pos := -1
@@ -572,6 +572,31 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 	return pid
 }
 
+// ProposeDemand send proposal Demand message to server
+func (clt *SXServiceClient) ProposeDemand(dmo *DemandOpts) uint64 {
+	pid := GenerateIntID()
+	dm := &api.Demand{
+		Id:          pid,
+		SenderId:    uint64(clt.ClientID),
+		TargetId:    dmo.Target,
+		ChannelType: clt.ChannelType,
+		DemandName:  dmo.Name,
+		Ts:          ptypes.TimestampNow(),
+		ArgJson:     dmo.JSON,
+		Cdata:       dmo.Cdata,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := clt.SXClient.Client.ProposeDemand(ctx, dm)
+	if err != nil {
+		log.Printf("ProposeDemand %  \nerr %v, [%v]", clt, err, dm)
+		return 0 // should check...
+	}
+	clt.NI.nodeState.proposeDemand(*dm)
+	return pid
+}
+
 // SelectSupply send select message to server
 func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 	tgt := &api.Target{
@@ -595,7 +620,7 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 		//		clt.SubscribeMbus()
 	}
 
-	clt.NI.nodeState.selectSupply(sp.Id)
+	//clt.NI.nodeState.selectSupply(sp.Id)
 
 	return uint64(clt.MbusID), nil
 }
@@ -616,8 +641,13 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 		return err
 	}
 	//	log.Println("SelectDemand Response:", resp)
+	clt.MbusID = IDType(resp.MbusId)
+	if clt.MbusID != 0 {
+		//TODO:  We need to implement Mbus systems
+		//		clt.SubscribeMbus()
+	}
 
-	clt.NI.nodeState.selectDemand(dm.Id)
+	//clt.NI.nodeState.selectDemand(dm.Id)
 
 	return nil
 }
@@ -834,8 +864,9 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 	clt.MbusID = id
 	//	log.Println("Confirm Success:", resp)
 
-	clt.NI.nodeState.selectDemand(uint64(id))
-	clt.NI.nodeState.selectSupply(uint64(id))
+	// nodestate may not work v0.5.0.
+	//	clt.NI.nodeState.selectDemand(uint64(id))
+	//	clt.NI.nodeState.selectSupply(uint64(id))
 
 	return nil
 }
@@ -879,8 +910,8 @@ func SubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.D
 	ctx := context.Background() //
 	var servAddr string = ""
 	for *loopFlag { // make it continuously working..
-		client.SubscribeDemand(ctx, dmcb)
-		log.Printf("Error on subscribe.")
+		err := client.SubscribeDemand(ctx, dmcb)
+		log.Printf("Error on subscribe. %v", err)
 		if client.SXClient == nil {
 			log.Printf("Already reconnect from other loop.")
 		} else {
@@ -915,3 +946,68 @@ func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.S
 }
 
 // We need to simplify the logic of separate NotifyDemand/SelectSupply
+
+// composit callback with selection checking
+func generateDemandCallback(ndcb func(*SXServiceClient, *api.Demand), sscb func(*SXServiceClient, *api.Demand)) func(*SXServiceClient, *api.Demand) {
+
+	return func(clt *SXServiceClient, dm *api.Demand) {
+		if dm.TargetId == 0 {
+			ndcb(clt, dm)
+		} else {
+			//
+			log.Printf("SelectSupply: %d: %v", dm.TargetId, clt.NI.nodeState.ProposedSupply)
+			pos := clt.NI.nodeState.proposedSupplyIndex(dm.TargetId)
+			if pos >= 0 { // it is proposed by me.
+				sscb(clt, dm)
+			} else {
+				log.Printf("sxutil:Other Proposal? %v", dm.TargetId)
+			}
+		}
+	}
+}
+
+// Composit Subscriber for demand (ndcb = notify demand callback, sscb = selectsupply cb)
+func CombinedSubscribeDemand(client *SXServiceClient, ndcb func(*SXServiceClient, *api.Demand), sscb func(*SXServiceClient, *api.Demand)) (*sync.Mutex, *bool) {
+	var mu sync.Mutex
+	loopFlag := true
+	dmcb := generateDemandCallback(ndcb, sscb)
+	go SubscribeDemand(client, dmcb, &mu, &loopFlag) // loop
+	return &mu, &loopFlag
+}
+
+// composit callback with DemandHandler
+func demandHandlerCallback(dh DemandHandler) func(*SXServiceClient, *api.Demand) {
+	return func(clt *SXServiceClient, dm *api.Demand) {
+		if dm.TargetId == 0 { // notify supply
+			spo := dh.OnNotifyDemand(clt, dm)
+			if spo != nil { // register propose Id.
+				spo.Target = dm.Id // need to set!
+				clt.ProposeSupply(spo)
+				// currentry not used proposed Id.
+			}
+		} else { // select supply
+			//
+			log.Printf("SelectSupply: %d: %v", dm.TargetId, clt.NI.nodeState.ProposedSupply)
+			pos := clt.NI.nodeState.proposedSupplyIndex(dm.TargetId)
+			if pos >= 0 { // it is proposed by me.
+				if dh.OnSelectSupply(clt, dm) { // if OK. send Confirm
+					err := clt.Confirm(IDType(dm.Id)) // send confirm to sender!
+					dh.OnConfirmResponse(clt, IDType(dm.Id), err)
+				} else { // no confirm.
+					// may remove proposal.
+				}
+			} else {
+				log.Printf("sxutil:Other Proposal? %v", dm.TargetId)
+			}
+		}
+	}
+}
+
+// Register DemandHandler
+func RegisterDemandHandler(client *SXServiceClient, dh DemandHandler) (*sync.Mutex, *bool) {
+	var mu sync.Mutex
+	loopFlag := true
+	dmcb := demandHandlerCallback(dh)
+	go SubscribeDemand(client, dmcb, &mu, &loopFlag) // loop
+	return &mu, &loopFlag
+}
