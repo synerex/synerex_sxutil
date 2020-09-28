@@ -745,17 +745,17 @@ func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServ
 }
 
 // v0.4.1 name change
-func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) error {
+func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) (uint64, error) { // return from mbus_msgID(sxutil v0.5.3)
 	if clt.MbusID == 0 {
-		return errors.New("No Mbus opened!")
+		return 0, errors.New("No Mbus opened!")
 	}
 	msg.MsgId = GenerateIntID()
 	msg.SenderId = uint64(clt.ClientID)
-	msg.MbusId = uint64(clt.MbusID)
+	msg.MbusId = uint64(clt.MbusID) // in the current implementation, we should not use multiple MBUS for each SXServiceClient.
 	//TODO: need to check response
-	_, err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
+	err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
 
-	return err
+	return msg.MsgId, err
 }
 
 // from synerex_api v0.4.0
