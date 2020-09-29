@@ -753,7 +753,10 @@ func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) (
 	msg.SenderId = uint64(clt.ClientID)
 	msg.MbusId = uint64(clt.MbusID) // in the current implementation, we should not use multiple MBUS for each SXServiceClient.
 	//TODO: need to check response
-	err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
+	resp, err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
+	if err == nil && resp.Ok == false {
+		err = errors.New(resp.Err)
+	}
 
 	return msg.MsgId, err
 }
