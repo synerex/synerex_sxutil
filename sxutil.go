@@ -467,7 +467,7 @@ type SXServiceClient struct {
 	ChannelType uint32
 	SXClient    *SXSynerexClient
 	ArgJson     string
-	MbusID      IDType
+	MbusIDs     []IDType
 	NI          *NodeServInfo
 }
 
@@ -614,19 +614,20 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 	}
 	//	log.Println("SelectSupply Response:", resp)
 	// if mbus is OK, start mbus!
-	clt.MbusID = IDType(resp.MbusId)
-	if clt.MbusID != 0 {
-		//TODO:  We need to implement Mbus systems
-		//		clt.SubscribeMbus()
-	}
+	//	clt.MbusID = IDType(resp.MbusId)
+	clt.MbusIDs = append(clt.MbusIDs, IDType(resp.MbusId))
+	//	if clt.MbusID != 0 {
+	//TODO:  We need to implement Mbus systems
+	//		clt.SubscribeMbus()
+	//	}
 
 	//clt.NI.nodeState.selectSupply(sp.Id)
 
-	return uint64(clt.MbusID), nil
+	return uint64(resp.MbusId), nil
 }
 
 // SelectDemand send select message to server
-func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
+func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 	tgt := &api.Target{
 		Id:          GenerateIntID(),
 		SenderId:    uint64(clt.ClientID),
@@ -638,18 +639,17 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) error {
 	resp, err := clt.SXClient.Client.SelectDemand(ctx, tgt)
 	if err != nil {
 		log.Printf("%v.SelectDemand err %v %v", clt, err, resp)
-		return err
+		return 0, err
 	}
 	//	log.Println("SelectDemand Response:", resp)
-	clt.MbusID = IDType(resp.MbusId)
-	if clt.MbusID != 0 {
-		//TODO:  We need to implement Mbus systems
-		//		clt.SubscribeMbus()
-	}
+	//	clt.MbusID = IDType(resp.MbusId)
+	clt.MbusIDs = append(clt.MbusIDs, IDType(resp.MbusId))
+	//	if clt.MbusID != 0 {
+	//TODO:  We need to implement Mbus systems
+	//		clt.SubscribeMbus()
+	//	}
 
-	//clt.NI.nodeState.selectDemand(dm.Id)
-
-	return nil
+	return uint64(resp.MbusId), nil
 }
 
 // SubscribeSupply  Wrapper function for SXServiceClient
@@ -714,11 +714,13 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 }
 
 // SubscribeMbus  Wrapper function for SXServiceClient
-func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServiceClient, *api.MbusMsg)) error {
+func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbusId uint64, mbcb func(*SXServiceClient, *api.MbusMsg)) error {
+
+	//TODO: we need to check there is mbus in the clt.MbusIDs
 
 	mb := &api.Mbus{
 		ClientId: uint64(clt.ClientID),
-		MbusId:   uint64(clt.MbusID),
+		MbusId:   uint64(mbusId),
 	}
 
 	smc, err := clt.SXClient.Client.SubscribeMbus(ctx, mb)
@@ -745,13 +747,13 @@ func (clt *SXServiceClient) SubscribeMbus(ctx context.Context, mbcb func(*SXServ
 }
 
 // v0.4.1 name change
-func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, msg *api.MbusMsg) (uint64, error) { // return from mbus_msgID(sxutil v0.5.3)
-	if clt.MbusID == 0 {
+func (clt *SXServiceClient) SendMbusMsg(ctx context.Context, mbusId uint64, msg *api.MbusMsg) (uint64, error) { // return from mbus_msgID(sxutil v0.5.3)
+	if len(clt.MbusIDs) == 0 {
 		return 0, errors.New("No Mbus opened!")
 	}
 	msg.MsgId = GenerateIntID()
 	msg.SenderId = uint64(clt.ClientID)
-	msg.MbusId = uint64(clt.MbusID) // in the current implementation, we should not use multiple MBUS for each SXServiceClient.
+	msg.MbusId = mbusId // uint64(clt.MbusID) // now we can use multiple mbus from v0.6.0
 	//TODO: need to check response
 	resp, err := clt.SXClient.Client.SendMbusMsg(ctx, msg)
 	if err == nil && resp.Ok == false {
@@ -774,17 +776,18 @@ func (clt *SXServiceClient) GetMbusStatus(ctx context.Context, mb *api.Mbus) (*a
 	return mbs, err
 }
 
-func (clt *SXServiceClient) CloseMbus(ctx context.Context) error {
-	if clt.MbusID == 0 {
+func (clt *SXServiceClient) CloseMbus(ctx context.Context, mbusId uint64) error {
+	if len(clt.MbusIDs) == 0 {
 		return errors.New("No Mbus opened!")
 	}
 	mbus := &api.Mbus{
 		ClientId: uint64(clt.ClientID),
-		MbusId:   uint64(clt.MbusID),
+		MbusId:   uint64(mbusId),
 	}
 	_, err := clt.SXClient.Client.CloseMbus(ctx, mbus)
 	if err == nil {
-		clt.MbusID = 0
+		//TODO:remove mbus /
+		//		clt.MbusID = 0
 	}
 	return err
 }
@@ -864,7 +867,7 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 		log.Printf("%v Confirm Failier %v %v", clt, err, resp)
 		return err
 	}
-	clt.MbusID = id
+	clt.MbusIDs = append(clt.MbusIDs, id)
 	//	log.Println("Confirm Success:", resp)
 
 	// nodestate may not work v0.5.0.
