@@ -27,6 +27,11 @@ type IDType uint64
 
 const WAIT_TIME = 30
 
+// this is for Message Timeout for synerex server
+const MSG_TIME_OUT = 20   // from v0.6.1 10sec -> 20sec
+
+const RECONNECT_WAIT = 5  // from v0.6.1
+
 // for git versions
 var (
 	Sha1Ver   string // sha1 version used to build the program
@@ -558,7 +563,7 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 	//Todo: We need to make if for each channel type
 	//	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	_, err := clt.SXClient.Client.ProposeSupply(ctx, sp)
 	if err != nil {
@@ -586,7 +591,7 @@ func (clt *SXServiceClient) ProposeDemand(dmo *DemandOpts) uint64 {
 		Cdata:       dmo.Cdata,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	_, err := clt.SXClient.Client.ProposeDemand(ctx, dm)
 	if err != nil {
@@ -605,7 +610,7 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 		TargetId:    sp.Id, /// Message Id of Supply (not SenderId),
 		ChannelType: sp.ChannelType,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.SelectSupply(ctx, tgt)
 	if err != nil {
@@ -634,7 +639,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 		TargetId:    dm.Id,
 		ChannelType: dm.ChannelType,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.SelectDemand(ctx, tgt)
 	if err != nil {
@@ -808,7 +813,7 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 	//	switch clt.ChannelType {
 	//	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 
 	_, err := clt.SXClient.Client.NotifyDemand(ctx, &dm)
@@ -837,7 +842,7 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 		Cdata:       smo.Cdata,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	//	resp , err := clt.Client.NotifySupply(ctx, &dm)
 
@@ -860,7 +865,7 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 		ChannelType: clt.ChannelType,
 		MbusId:      uint64(id),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.Confirm(ctx, tg)
 	if err != nil {
@@ -886,7 +891,7 @@ func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
 		log.Printf("Client reset \n")
 	}
 	mu.Unlock()
-	time.Sleep(5 * time.Second) // wait 5 seconds to reconnect
+	time.Sleep(RECONNECT_WAIT * time.Second) // wait 5 seconds to reconnect
 	mu.Lock()
 	if client.SXClient == nil && servAddr != "" {
 		newClt := GrpcConnectServer(servAddr)
