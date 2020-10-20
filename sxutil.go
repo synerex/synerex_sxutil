@@ -28,9 +28,9 @@ type IDType uint64
 const WAIT_TIME = 30
 
 // this is for Message Timeout for synerex server
-const MSG_TIME_OUT = 20   // from v0.6.1 10sec -> 20sec
+const MSG_TIME_OUT = 20 // from v0.6.1 10sec -> 20sec
 
-const RECONNECT_WAIT = 5  // from v0.6.1
+const RECONNECT_WAIT = 5 // from v0.6.1
 
 // for git versions
 var (
@@ -781,6 +781,19 @@ func (clt *SXServiceClient) GetMbusStatus(ctx context.Context, mb *api.Mbus) (*a
 	return mbs, err
 }
 
+func (clt *SXServiceClient) MbusIndex(id uint64) int {
+	for i := 0; i < len(clt.MbusIDs); i++ {
+		if uint64(clt.MbusIDs[i]) == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (clt *SXServiceClient) removeMbusIndex(pos int) {
+	clt.MbusIDs = append(clt.MbusIDs[:pos], clt.MbusIDs[pos+1:]...)
+}
+
 func (clt *SXServiceClient) CloseMbus(ctx context.Context, mbusId uint64) error {
 	if len(clt.MbusIDs) == 0 {
 		return errors.New("No Mbus opened!")
@@ -791,8 +804,12 @@ func (clt *SXServiceClient) CloseMbus(ctx context.Context, mbusId uint64) error 
 	}
 	_, err := clt.SXClient.Client.CloseMbus(ctx, mbus)
 	if err == nil {
-		//TODO:remove mbus /
-		//		clt.MbusID = 0
+		pos := clt.MbusIndex(mbusId)
+		if pos >= 0 {
+			clt.removeMbusIndex(pos)
+		} else {
+			log.Printf("not found supply[%d]\n", mbusId)
+		}
 	}
 	return err
 }
@@ -857,7 +874,7 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 }
 
 // Confirm sends confirm message to sender
-func (clt *SXServiceClient) Confirm(id IDType) error {
+func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
 	tg := &api.Target{
 		Id:          GenerateIntID(),
 		SenderId:    uint64(clt.ClientID),
@@ -877,7 +894,7 @@ func (clt *SXServiceClient) Confirm(id IDType) error {
 
 	// nodestate may not work v0.5.0.
 	//	clt.NI.nodeState.selectDemand(uint64(id))
-	//	clt.NI.nodeState.selectSupply(uint64(id))
+	clt.NI.nodeState.selectSupply(uint64(pid))
 
 	return nil
 }
@@ -1002,7 +1019,7 @@ func demandHandlerCallback(dh DemandHandler) func(*SXServiceClient, *api.Demand)
 			pos := clt.NI.nodeState.proposedSupplyIndex(dm.TargetId)
 			if pos >= 0 { // it is proposed by me.
 				if dh.OnSelectSupply(clt, dm) { // if OK. send Confirm
-					err := clt.Confirm(IDType(dm.Id)) // send confirm to sender!
+					err := clt.Confirm(IDType(dm.Id), IDType(dm.TargetId)) // send confirm to sender!
 					dh.OnConfirmResponse(clt, IDType(dm.Id), err)
 				} else { // no confirm.
 					// may remove proposal.
