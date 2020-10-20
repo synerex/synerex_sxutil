@@ -808,7 +808,7 @@ func (clt *SXServiceClient) CloseMbus(ctx context.Context, mbusId uint64) error 
 		if pos >= 0 {
 			clt.removeMbusIndex(pos)
 		} else {
-			log.Printf("not found supply[%d]\n", mbusId)
+			log.Printf("not found mbusID[%d]\n", mbusId)
 		}
 	}
 	return err
