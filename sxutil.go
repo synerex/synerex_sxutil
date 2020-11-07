@@ -473,6 +473,7 @@ type SXServiceClient struct {
 	SXClient    *SXSynerexClient
 	ArgJson     string
 	MbusIDs     []IDType
+	mbusMutex   sync.RWMutex
 	NI          *NodeServInfo
 }
 
@@ -620,7 +621,9 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 	//	log.Println("SelectSupply Response:", resp)
 	// if mbus is OK, start mbus!
 	//	clt.MbusID = IDType(resp.MbusId)
+	clt.mbusMutex.Lock()
 	clt.MbusIDs = append(clt.MbusIDs, IDType(resp.MbusId))
+	clt.mbusMutex.Unlock()
 	//	if clt.MbusID != 0 {
 	//TODO:  We need to implement Mbus systems
 	//		clt.SubscribeMbus()
@@ -804,12 +807,14 @@ func (clt *SXServiceClient) CloseMbus(ctx context.Context, mbusId uint64) error 
 	}
 	_, err := clt.SXClient.Client.CloseMbus(ctx, mbus)
 	if err == nil {
+		clt.mbusMutex.Lock()
 		pos := clt.MbusIndex(mbusId)
 		if pos >= 0 {
 			clt.removeMbusIndex(pos)
 		} else {
 			log.Printf("not found mbusID[%d]\n", mbusId)
 		}
+		clt.mbusMutex.Unlock()
 	}
 	return err
 }
