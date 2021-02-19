@@ -285,11 +285,20 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 		}
 
 		if ni.myNodeType == nodeapi.NodeType_SERVER {
-			c, _ := cpu.Percent(5, false)
-			v, _ := mem.VirtualMemory()
+			c, perr := cpu.Percent(5, false) // obtain cpu status
+			var percent float64 = 0
+			if perr == nil && c != nil {
+				percent = c[0]
+			} else {
+				log.Println("cpu.Percent returns error ", perr, ":", c)
+			}
+			v, verr := mem.VirtualMemory()
+			if verr != nil {
+				log.Println("mem.VirtualMemory() returns error ", verr, ":", v)
+			}
 			var status nodeapi.ServerStatus
 			status = nodeapi.ServerStatus{
-				Cpu:      c[0],
+				Cpu:      percent,
 				Memory:   v.UsedPercent,
 				MsgCount: ni.msgCount,
 			}
