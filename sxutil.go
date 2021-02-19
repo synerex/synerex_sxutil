@@ -10,8 +10,8 @@ import (
 
 	"github.com/bwmarrin/snowflake"
 	"github.com/golang/protobuf/ptypes"
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 	api "github.com/synerex/synerex_api"
 	nodeapi "github.com/synerex/synerex_nodeapi"
 	pbase "github.com/synerex/synerex_proto"
@@ -285,9 +285,9 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 		}
 
 		if ni.myNodeType == nodeapi.NodeType_SERVER {
-			c, perr := cpu.Percent(5, false) // obtain cpu status
+			c, perr := cpu.Percent(0, false) // obtain cpu status
 			var percent float64 = 0
-			if perr == nil && c != nil {
+			if perr == nil && c != nil && len(c) > 0 {
 				percent = c[0]
 			} else {
 				log.Println("cpu.Percent returns error ", perr, ":", c)
@@ -861,9 +861,10 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 
 // NotifySupply sends Typed Supply to Server
 func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
+	log.Println("Try to send NotifySupply00")
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
-	dm := api.Supply{
+	sp := api.Supply{
 		Id:          id,
 		SenderId:    uint64(clt.ClientID),
 		ChannelType: clt.ChannelType,
@@ -872,17 +873,15 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 		ArgJson:     smo.JSON,
 		Cdata:       smo.Cdata,
 	}
-
+	log.Println("Try to send NotifySupply:", smo)
 	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
-	//	resp , err := clt.Client.NotifySupply(ctx, &dm)
-
-	_, err := clt.SXClient.Client.NotifySupply(ctx, &dm)
+	resp , err := clt.SXClient.Client.NotifySupply(ctx, &sp)
 	if err != nil {
-		log.Printf("Error for sending:NotifySupply to  Synerex Server as %v ", err)
+		log.Printf("Error for sending:NotifySupply to  Synerex Server as [%v] ", err)
 		return 0, err
 	}
-	//	log.Println("RegiterSupply:", smo, resp)
+	log.Println("NotifySupply:", smo, resp)
 	smo.ID = id // assign ID
 	return id, nil
 }
