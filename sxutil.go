@@ -675,7 +675,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXServiceClient, *api.Supply)) error {
 	ch := clt.getChannel()
 	// check status
-	sclt := clt.SXClient.Client
+//	sclt := clt.SXClient.Client
 	
 
 	smc, err := clt.SXClient.Client.SubscribeSupply(ctx, ch)
