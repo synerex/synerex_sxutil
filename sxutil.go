@@ -288,7 +288,9 @@ func (ni *NodeServInfo) startKeepAliveWithCmd(cmd_func func(nodeapi.KeepAliveCom
 			c, perr := cpu.Percent(0, false) // obtain cpu status
 			var percent float64 = 0
 			if perr == nil && c != nil && len(c) > 0 {
-				percent = c[0]
+				if len(c) != 0 {
+					percent = c[0]
+				}
 			} else {
 				log.Println("cpu.Percent returns error ", perr, ":", c)
 			}
@@ -672,6 +674,10 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 // SubscribeSupply  Wrapper function for SXServiceClient
 func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXServiceClient, *api.Supply)) error {
 	ch := clt.getChannel()
+	// check status
+	sclt := clt.SXClient.Client
+	
+
 	smc, err := clt.SXClient.Client.SubscribeSupply(ctx, ch)
 	if err != nil {
 		log.Printf("%v SubscribeSupply Error %v", clt, err)
