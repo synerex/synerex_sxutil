@@ -675,8 +675,7 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXServiceClient, *api.Supply)) error {
 	ch := clt.getChannel()
 	// check status
-//	sclt := clt.SXClient.Client
-	
+	//	sclt := clt.SXClient.Client
 
 	smc, err := clt.SXClient.Client.SubscribeSupply(ctx, ch)
 	if err != nil {
@@ -867,7 +866,6 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 
 // NotifySupply sends Typed Supply to Server
 func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
-	log.Println("Try to send NotifySupply00")
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	sp := api.Supply{
@@ -879,15 +877,13 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 		ArgJson:     smo.JSON,
 		Cdata:       smo.Cdata,
 	}
-	log.Println("Try to send NotifySupply:", smo)
 	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
-	resp , err := clt.SXClient.Client.NotifySupply(ctx, &sp)
+	resp, err := clt.SXClient.Client.NotifySupply(ctx, &sp)
 	if err != nil {
-		log.Printf("Error for sending:NotifySupply to  Synerex Server as [%v] ", err)
+		log.Printf("Error for sending:NotifySupply to  Synerex Server as [%v] %v", err, resp)
 		return 0, err
 	}
-	log.Println("NotifySupply:", smo, resp)
 	smo.ID = id // assign ID
 	return id, nil
 }
