@@ -475,6 +475,7 @@ func (ni *NodeServInfo) UnRegisterNode() {
 type SXSynerexClient struct {
 	ServerAddress string
 	Client        api.SynerexClient
+	GrpcConn      *grpc.ClientConn
 }
 
 // SXServiceClient Wrappter Structure for synerex client
@@ -491,16 +492,27 @@ type SXServiceClient struct {
 // GrpcConnectServer is a utility function for conneting gRPC server
 func GrpcConnectServer(serverAddress string) *SXSynerexClient { // TODO: we may add connection option
 	var opts []grpc.DialOption
+	if serverAddress == "" {
+		log.Printf("sxutil: [FATAL] no server address cor GrpcConnectServer")
+		return nil
+	}
 	opts = append(opts, grpc.WithInsecure()) // currently we do not use sercure connection //TODO: we need to udpate SSL
+	opts = append(opts, grpc.WithBlock()) // this is recuired to ensure client connection
 	conn, err := grpc.Dial(serverAddress, opts...)
-	if err != nil {
-		log.Printf("fail to connect server %s: %v", serverAddress, err)
+	if err != nil { 
+		log.Printf("sxutil:GRPC-conn  Failed to connect server [%s] err:%v", serverAddress, err)
+		if conn != nil{
+			log.Printf("sxutil: see state %v", conn.GetState())
+			err = conn.Close()
+			log.Printf("sxutil: close GRPC-conn %v",err)
+		}		
 		return nil
 	}
 	// from v0.5.0 , we support Connection in sxutil.
 	return &SXSynerexClient{
 		ServerAddress: serverAddress,
 		Client:        api.NewSynerexClient(conn),
+		GrpcConn:conn,
 	}
 }
 
@@ -676,10 +688,14 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 	ch := clt.getChannel()
 	// check status
 	//	sclt := clt.SXClient.Client
-
+	if clt.SXClient == nil {
+		err := errors.New("sxutil:SXClient is nil")
+		log.Printf("sxutil: SXServiceClient.SubscribeSupply No Client Info!")
+		return err
+	}
 	smc, err := clt.SXClient.Client.SubscribeSupply(ctx, ch)
 	if err != nil {
-		log.Printf("%v SubscribeSupply Error %v", clt, err)
+		log.Printf("sxutil: SXServiceClient.SubscribeSupply Error %v", err)
 		return err
 	}
 	for {
@@ -687,9 +703,9 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 		sp, err = smc.Recv() // receive Demand
 		if err != nil {
 			if err == io.EOF {
-				log.Print("End Supply subscribe OK")
+				log.Print("sxutil: End Supply subscribe OK")
 			} else {
-				log.Printf("%v SXServiceClient SubscribeSupply error [%v]", clt, err)
+				log.Printf("sxutil: SXServiceClient SubscribeSupply error [%v]", err)
 			}
 			break
 		}
@@ -698,7 +714,7 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 		if !clt.NI.nodeState.Locked {
 			spcb(clt, sp)
 		} else {
-			log.Println("Provider is locked!")
+			log.Println("sxutil: Provider is locked!") // for movement
 		}
 	}
 	return err
@@ -709,7 +725,7 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 	ch := clt.getChannel()
 	dmc, err := clt.SXClient.Client.SubscribeDemand(ctx, ch)
 	if err != nil {
-		log.Printf("%v SubscribeDemand Error %v", clt, err)
+		log.Printf("sxutil: clt.SubscribeDemand Error [%v] %v", err, clt)
 		return err // sender should handle error...
 	}
 	for {
@@ -917,10 +933,15 @@ func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
 // Simple Robust SubscribeDemand/Supply with ReConnect function. (2020/09~ v0.5.0)
 
 func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
+	// may need to reset old connection to stop redialing.
+	
 	mu.Lock()
 	if client.SXClient != nil {
+	// may need to reset old connection to stop redialing.
+		log.Printf("sxutil: Conn state: %v closeErr: %v",client.SXClient.GrpcConn.GetState(), client.SXClient.GrpcConn.Close())
+
 		client.SXClient = nil
-		log.Printf("Client reset \n")
+		log.Printf("sxutil:Client reset with srvaddr:%s\n",servAddr)
 	}
 	mu.Unlock()
 	time.Sleep(RECONNECT_WAIT * time.Second) // wait 5 seconds to reconnect
@@ -928,14 +949,15 @@ func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
 	if client.SXClient == nil && servAddr != "" {
 		newClt := GrpcConnectServer(servAddr)
 		if newClt != nil {
-			log.Printf("Reconnect server [%s]\n", servAddr)
+			log.Printf("sxutil: Reconnect server [%s] %v\n", servAddr, newClt)
 			client.SXClient = newClt
+			mu.Unlock()
 			return
 		} else {
-			log.Printf("Can't re-connect server..")
+			log.Printf("sxutil: Can't re-connect server..")
 		}
 	} else { // someone may connect!
-		log.Printf("Use reconnected client.. \n")
+		log.Printf("sxutil: Use reconnected client.. %v :svadr: %s\n", client.SXClient, servAddr)
 	}
 	mu.Unlock()
 }
@@ -951,20 +973,25 @@ func SimpleSubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, 
 // Continuous (error free) subscriber for demand
 func SubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.Demand), mu *sync.Mutex, loopFlag *bool) {
 	ctx := context.Background() //
-	var servAddr string = ""
+	if client.SXClient == nil {
+		log.Printf("sxutil: SubscribeDemand should called with correct info")
+	}
+	var servAddr string = client.SXClient.ServerAddress
 	for *loopFlag { // make it continuously working..
 		err := client.SubscribeDemand(ctx, dmcb)
-		log.Printf("Error on subscribe. %v", err)
-		if client.SXClient == nil {
-			log.Printf("Already reconnect from other loop.")
-		} else {
+		//		log.Printf("sxutil:Error on subscribeDemand . %v", err)
+		
+		if client.SXClient != nil { 
 			servAddr = client.SXClient.ServerAddress
+			log.Printf("sxutil: reset server address %s, err:%v",servAddr,err)
+		} else {
+			log.Printf("sxutil: SXClient is nil %v",err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
 }
 
-// Simple Continuous (error free) subscriber for demand
+// Simple Continuous (error free) subscriber for supply
 func SimpleSubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply)) (*sync.Mutex, *bool) {
 	var mu sync.Mutex
 	loopFlag := true
@@ -972,21 +999,47 @@ func SimpleSubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, 
 	return &mu, &loopFlag
 }
 
-// Continuous (error free) subscriber for demand
+/*
+func (ni *NodeServInfo) RobustSubscribeSupply(specifiedSXAddress string) {
+	sxlient := sxutil.GrpcConnectServer(sxDstServerAddress)
+	s := &SXServiceClient{
+		ClientID:    IDType(ni.node.Generate()),
+		ChannelType: mtype,
+		SXClient:    clt,
+		ArgJson:     argJson,
+		NI:          ni,
+	}
+	return s
+        }*/
+
+
+
+
+
+// Continuous (error free) subscriber for supply
 func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply), mu *sync.Mutex, loopFlag *bool) {
 	ctx := context.Background() //
-	var servAddr string = ""
+	if client.SXClient == nil || client.SXClient.ServerAddress == "" {
+		log.Printf("sxutil: [FATAL] SubscribeSupply should called with correct info")
+		return
+	}
+	var servAddr string = client.SXClient.ServerAddress
+	//	log.Printf("sxutil: SubscribeSupply with ServerAddress [%s]",servAddr)
 	for *loopFlag { // make it continuously working..
-		client.SubscribeSupply(ctx, spcb)
-		log.Printf("Error on subscribe.")
-		if client.SXClient == nil {
-			log.Printf("Already reconnect from other loop.")
-		} else {
+		err := client.SubscribeSupply(ctx, spcb) // this may block until the connection broken
+		//
+		if client.SXClient != nil {
 			servAddr = client.SXClient.ServerAddress
+			log.Printf("sxutil: SubscribeSupply: reset server address [%s]",servAddr)
+		} else {
+			log.Printf("sxutil: SXClient is nil in SubscribeSupply, err:%v", err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
 }
+
+
+
 
 // We need to simplify the logic of separate NotifyDemand/SelectSupply
 
