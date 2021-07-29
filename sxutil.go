@@ -3,8 +3,12 @@ package sxutil // import "github.com/synerex/synerex_sxutil"
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"io"
 	"log"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,6 +16,12 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	zipkin "github.com/openzipkin/zipkin-go"
+	zipkingrpc "github.com/openzipkin/zipkin-go/middleware/grpc"
+	zipkinrep "github.com/openzipkin/zipkin-go/reporter"
+	httpreporter "github.com/openzipkin/zipkin-go/reporter/http"
+
 	api "github.com/synerex/synerex_api"
 	nodeapi "github.com/synerex/synerex_nodeapi"
 	pbase "github.com/synerex/synerex_proto"
@@ -37,6 +47,13 @@ var (
 	Sha1Ver   string // sha1 version used to build the program
 	BuildTime string // when the executable was built
 	GitVer    string // git release tag
+)
+
+// for Zipkin instrumentation Flags variable
+var (
+	ZipkinHost    string // Zipkin Hostname (if blank, no zipkin)
+	ZipkinPort    int    // Zipkin Port
+	ZipkinRepoter zipkinrep.Reporter
 )
 
 // NodeservInfo is a connection info for each Node Server
@@ -175,6 +192,32 @@ func (ns *NodeState) selectDemand(id uint64) bool {
 func init() {
 	//	fmt.Println("Synergic Exchange Util init() is called!")
 	defaultNI = NewNodeServInfo()
+
+	// for zipkin initialization
+	if ZipkinHost != "_DISABLE_" { // if you set sxutil.ZipkinHost as "_DISABLE_", disable Zipkin Flags.
+		flag.StringVar(&ZipkinHost, "zipkinhost", getZipkinHostName(), "Enable Zipkin Server with Zipkin Hostname(SX_ZIPKIN_HOST)")
+		flag.IntVar(&ZipkinPort, "zipkinport", getZipkinPort(), "Zipkin Port Number(SX_ZIPKIN_PORT)")
+	}
+
+}
+
+func getZipkinHostName() string {
+	env := os.Getenv("SX_ZIPKIN_HOST")
+	if env != "" {
+		return env
+	} else {
+		return "" // default NO
+	}
+}
+
+func getZipkinPort() int {
+	env := os.Getenv("SX_ZIPKIN_PORT")
+	if env != "" {
+		env, _ := strconv.Atoi(env)
+		return env
+	} else {
+		return 9411
+	}
 }
 
 // GetDefaultNodeServInfo returns Default NodeServ Info for sxutil
@@ -367,18 +410,41 @@ func MsgCountUp() { // is this needed?
 
 // RegisterNode is a function to register Node with node server address
 func RegisterNode(nodesrv string, nm string, channels []uint32, serv *SxServerOpt) (string, error) { // register ID to server
-	return RegisterNodeWithCmd(nodesrv, nm, channels, serv, nil)
+	return RegisterNodeWithName(nodesrv, nm, channels, serv, "sxutil-node")
+}
+
+func RegisterNodeWithName(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cltName string) (string, error) { // register ID to server
+	return RegisterNodeWithCmd(nodesrv, nm, channels, serv, cltName, nil)
 }
 
 // RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
-func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
-	return defaultNI.RegisterNodeWithCmd(nodesrv, nm, channels, serv, cmd_func)
+func RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cltName string, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
+	return defaultNI.RegisterNodeWithCmd(nodesrv, nm, channels, serv, cltName, cmd_func)
 }
 
 // RegisterNodeWithCmd is a function to register Node with node server address and KeepAlive Command Callback
-func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
+func (ni *NodeServInfo) RegisterNodeWithCmd(nodesrv string, nm string, channels []uint32, serv *SxServerOpt, cltName string, cmd_func func(nodeapi.KeepAliveCommand, string)) (string, error) { // register ID to server
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure()) // insecure
+
+	// add zipkin instrumentation for client
+	if len(ZipkinHost) > 0 && ZipkinHost != "_DISABLE_" {
+		if ZipkinRepoter == nil {
+			zhost := fmt.Sprintf("http://%s:%d/api/v2/spans", ZipkinHost, ZipkinPort)
+			ZipkinRepoter = httpreporter.NewReporter(zhost)
+			log.Printf("sxutil0:Set ZipkinReporter %s", zhost)
+		}
+		localEndpoint, lerr := zipkin.NewEndpoint(cltName, "127.0.0.1:0")
+		if lerr != nil {
+			log.Fatalf("sxutil:Can't create new Zipkin localEndpoint for %s:%v", cltName, lerr)
+		}
+		zipkinTracer, err := zipkin.NewTracer(ZipkinRepoter, zipkin.WithLocalEndpoint(localEndpoint))
+		if err != nil {
+			log.Fatalf("sxutil:Can't create new Zipkin tracer for %s:%v", cltName, err)
+		}
+		opts = append(opts, grpc.WithStatsHandler(zipkingrpc.NewClientHandler(zipkinTracer)))
+	}
+
 	var err error
 	ni.conn, err = grpc.Dial(nodesrv, opts...)
 	if err != nil {
@@ -491,28 +557,53 @@ type SXServiceClient struct {
 
 // GrpcConnectServer is a utility function for conneting gRPC server
 func GrpcConnectServer(serverAddress string) *SXSynerexClient { // TODO: we may add connection option
+	return GrpcConnectServerWithName(serverAddress, "ndclt")
+}
+
+// GrpcConnectServerWithName is a utility function for conneting gRPC server with Zipkin Name
+func GrpcConnectServerWithName(serverAddress string, clientName string) *SXSynerexClient { // TODO: we may add connection option
 	var opts []grpc.DialOption
 	if serverAddress == "" {
 		log.Printf("sxutil: [FATAL] no server address cor GrpcConnectServer")
 		return nil
 	}
 	opts = append(opts, grpc.WithInsecure()) // currently we do not use sercure connection //TODO: we need to udpate SSL
-	opts = append(opts, grpc.WithBlock()) // this is recuired to ensure client connection
+	opts = append(opts, grpc.WithBlock())    // this is recuired to ensure client connection
+
+	// if ZipKin!
+	if len(ZipkinHost) > 0 && ZipkinHost != "_DISABLE_" {
+		if ZipkinRepoter == nil {
+			zhost := fmt.Sprintf("http://%s:%d/api/v2/spans", ZipkinHost, ZipkinPort)
+			ZipkinRepoter = httpreporter.NewReporter(zhost)
+			log.Printf("sxutil:Set ZipkinReporter %s", zhost)
+		}
+
+		localEndpoint, lerr := zipkin.NewEndpoint(clientName, "127.0.0.1:0")
+		if lerr != nil {
+			log.Fatalf("sxutil:Can't create new Zipkin localEndpoint for %s:%v", clientName, lerr)
+		}
+		zipkinTracer, err := zipkin.NewTracer(ZipkinRepoter, zipkin.WithLocalEndpoint(localEndpoint))
+		if err != nil {
+			log.Fatalf("sxutil:Can't create new Zipkin tracer for sxclt:%v", err)
+		}
+		opts = append(opts, grpc.WithStatsHandler(zipkingrpc.NewClientHandler(zipkinTracer)))
+	}
+
 	conn, err := grpc.Dial(serverAddress, opts...)
-	if err != nil { 
-		log.Printf("sxutil:GRPC-conn  Failed to connect server [%s] err:%v", serverAddress, err)
-		if conn != nil{
+	if err != nil {
+		log.Printf("sxutil:GRPC-conn Failed to connect server [%s] err:%v", serverAddress, err)
+		if conn != nil {
 			log.Printf("sxutil: see state %v", conn.GetState())
 			err = conn.Close()
-			log.Printf("sxutil: close GRPC-conn %v",err)
-		}		
+			log.Printf("sxutil: close GRPC-conn %v", err)
+		}
 		return nil
 	}
 	// from v0.5.0 , we support Connection in sxutil.
 	return &SXSynerexClient{
 		ServerAddress: serverAddress,
 		Client:        api.NewSynerexClient(conn),
-		GrpcConn:conn,
+		GrpcConn:      conn,
 	}
 }
 
@@ -698,6 +789,11 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 		log.Printf("sxutil: SXServiceClient.SubscribeSupply Error %v", err)
 		return err
 	}
+	// we should prepare zipkin tracer here.
+	//	if ZipkinReport != nil {
+	//		zipkinTracer, err := zipkin.NewTracer(ZipkinRepoter, zipkin.c(localEndpoint))
+	//	}
+
 	for {
 		var sp *api.Supply
 		sp, err = smc.Recv() // receive Demand
@@ -882,6 +978,7 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 
 // NotifySupply sends Typed Supply to Server
 func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
+	//	log.Println("Try to send NotifySupply00")
 	id := GenerateIntID()
 	ts := ptypes.TimestampNow()
 	sp := api.Supply{
@@ -893,6 +990,7 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 		ArgJson:     smo.JSON,
 		Cdata:       smo.Cdata,
 	}
+	//	log.Println("Try to send NotifySupply:", smo)
 	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.NotifySupply(ctx, &sp)
@@ -934,14 +1032,14 @@ func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
 
 func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
 	// may need to reset old connection to stop redialing.
-	
+
 	mu.Lock()
 	if client.SXClient != nil {
-	// may need to reset old connection to stop redialing.
-		log.Printf("sxutil: Conn state: %v closeErr: %v",client.SXClient.GrpcConn.GetState(), client.SXClient.GrpcConn.Close())
+		// may need to reset old connection to stop redialing.
+		log.Printf("sxutil: Conn state: %v closeErr: %v", client.SXClient.GrpcConn.GetState(), client.SXClient.GrpcConn.Close())
 
 		client.SXClient = nil
-		log.Printf("sxutil:Client reset with srvaddr:%s\n",servAddr)
+		log.Printf("sxutil:Client reset with srvaddr:%s\n", servAddr)
 	}
 	mu.Unlock()
 	time.Sleep(RECONNECT_WAIT * time.Second) // wait 5 seconds to reconnect
@@ -980,12 +1078,12 @@ func SubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.D
 	for *loopFlag { // make it continuously working..
 		err := client.SubscribeDemand(ctx, dmcb)
 		//		log.Printf("sxutil:Error on subscribeDemand . %v", err)
-		
-		if client.SXClient != nil { 
+
+		if client.SXClient != nil {
 			servAddr = client.SXClient.ServerAddress
-			log.Printf("sxutil: reset server address %s, err:%v",servAddr,err)
+			log.Printf("sxutil: reset server address %s, err:%v", servAddr, err)
 		} else {
-			log.Printf("sxutil: SXClient is nil %v",err)
+			log.Printf("sxutil: SXClient is nil %v", err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
@@ -999,24 +1097,7 @@ func SimpleSubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, 
 	return &mu, &loopFlag
 }
 
-/*
-func (ni *NodeServInfo) RobustSubscribeSupply(specifiedSXAddress string) {
-	sxlient := sxutil.GrpcConnectServer(sxDstServerAddress)
-	s := &SXServiceClient{
-		ClientID:    IDType(ni.node.Generate()),
-		ChannelType: mtype,
-		SXClient:    clt,
-		ArgJson:     argJson,
-		NI:          ni,
-	}
-	return s
-        }*/
-
-
-
-
-
-// Continuous (error free) subscriber for supply
+// Continuous (error free) subscriber for demand
 func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply), mu *sync.Mutex, loopFlag *bool) {
 	ctx := context.Background() //
 	if client.SXClient == nil || client.SXClient.ServerAddress == "" {
@@ -1030,16 +1111,13 @@ func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.S
 		//
 		if client.SXClient != nil {
 			servAddr = client.SXClient.ServerAddress
-			log.Printf("sxutil: SubscribeSupply: reset server address [%s]",servAddr)
+			log.Printf("sxutil: SubscribeSupply: reset server address [%s]", servAddr)
 		} else {
 			log.Printf("sxutil: SXClient is nil in SubscribeSupply, err:%v", err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
 }
-
-
-
 
 // We need to simplify the logic of separate NotifyDemand/SelectSupply
 
