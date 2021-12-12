@@ -2,9 +2,11 @@ package sxutil // import "github.com/synerex/synerex_sxutil"
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +18,15 @@ import (
 	nodeapi "github.com/synerex/synerex_nodeapi"
 	pbase "github.com/synerex/synerex_proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/baggage"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // sxutil.go is a helper utility package for Synerex
@@ -67,20 +78,22 @@ var defaultNI *NodeServInfo
 
 // DemandOpts is sender options for Demand
 type DemandOpts struct {
-	ID     uint64
-	Target uint64
-	Name   string
-	JSON   string
-	Cdata  *api.Content
+	ID      uint64
+	Target  uint64
+	Name    string
+	JSON    string
+	Cdata   *api.Content
+	Context context.Context // mainly for propergate span context
 }
 
 // SupplyOpts is sender options for Supply
 type SupplyOpts struct {
-	ID     uint64
-	Target uint64
-	Name   string
-	JSON   string
-	Cdata  *api.Content
+	ID      uint64
+	Target  uint64
+	Name    string
+	JSON    string
+	Cdata   *api.Content
+	Context context.Context // mainly for propergate span context
 }
 
 type SxServerOpt struct {
@@ -497,22 +510,27 @@ func GrpcConnectServer(serverAddress string) *SXSynerexClient { // TODO: we may 
 		return nil
 	}
 	opts = append(opts, grpc.WithInsecure()) // currently we do not use sercure connection //TODO: we need to udpate SSL
-	opts = append(opts, grpc.WithBlock()) // this is recuired to ensure client connection
+	opts = append(opts, grpc.WithBlock())    // this is recuired to ensure client connection
+
+	// adding openTelemetry grpc options.
+	opts = append(opts, grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()))
+	opts = append(opts, grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
+
 	conn, err := grpc.Dial(serverAddress, opts...)
-	if err != nil { 
+	if err != nil {
 		log.Printf("sxutil:GRPC-conn  Failed to connect server [%s] err:%v", serverAddress, err)
-		if conn != nil{
+		if conn != nil {
 			log.Printf("sxutil: see state %v", conn.GetState())
 			err = conn.Close()
-			log.Printf("sxutil: close GRPC-conn %v",err)
-		}		
+			log.Printf("sxutil: close GRPC-conn %v", err)
+		}
 		return nil
 	}
 	// from v0.5.0 , we support Connection in sxutil.
 	return &SXSynerexClient{
 		ServerAddress: serverAddress,
 		Client:        api.NewSynerexClient(conn),
-		GrpcConn:conn,
+		GrpcConn:      conn,
 	}
 }
 
@@ -582,12 +600,15 @@ func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 		ArgJson:     spo.JSON,
 		Cdata:       spo.Cdata,
 	}
+	if spo.Context == nil { // if not set
+		spo.Context = context.Background()
+	}
 
 	//	switch clt.ChannelType {//
 	//Todo: We need to make if for each channel type
 	//	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+	ctx, cancel := context.WithTimeout(spo.Context, MSG_TIME_OUT*time.Second)
 	defer cancel()
 	_, err := clt.SXClient.Client.ProposeSupply(ctx, sp)
 	if err != nil {
@@ -615,7 +636,11 @@ func (clt *SXServiceClient) ProposeDemand(dmo *DemandOpts) uint64 {
 		Cdata:       dmo.Cdata,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+	if dmo.Context == nil { // if not set
+		dmo.Context = context.Background()
+	}
+
+	ctx, cancel := context.WithTimeout(dmo.Context, MSG_TIME_OUT*time.Second)
 	defer cancel()
 	_, err := clt.SXClient.Client.ProposeDemand(ctx, dm)
 	if err != nil {
@@ -626,15 +651,15 @@ func (clt *SXServiceClient) ProposeDemand(dmo *DemandOpts) uint64 {
 	return pid
 }
 
-// SelectSupply send select message to server
-func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
+// withContext for select supply
+func (clt *SXServiceClient) SelectSupplyWithContext(ctx context.Context, sp *api.Supply) (uint64, error) {
 	tgt := &api.Target{
 		Id:          GenerateIntID(),
 		SenderId:    uint64(clt.ClientID),
 		TargetId:    sp.Id, /// Message Id of Supply (not SenderId),
 		ChannelType: sp.ChannelType,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.SelectSupply(ctx, tgt)
 	if err != nil {
@@ -657,15 +682,44 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 	return uint64(resp.MbusId), nil
 }
 
+// SelectSupply send select message to server
+func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
+	return clt.SelectSupplyWithContext(context.Background(), sp)
+}
+
+func (clt *SXServiceClient) SelectModifiedSupplyWithContext(ctx context.Context, sp *api.Supply) (uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, MSG_TIME_OUT*time.Second)
+	defer cancel()
+	resp, err := clt.SXClient.Client.SelectModifiedSupply(ctx, sp)
+	if err != nil {
+		log.Printf("%v.SelectSupply err %v %v", clt, err, resp)
+		return 0, err
+	}
+	log.Println("SelectModifiedSupply Response:", resp)
+	// if mbus is OK, start mbus!
+	//	clt.MbusID = IDType(resp.MbusId)
+	clt.mbusMutex.Lock()
+	clt.MbusIDs = append(clt.MbusIDs, IDType(resp.MbusId))
+	clt.mbusMutex.Unlock()
+	//	if clt.MbusID != 0 {
+	//TODO:  We need to implement Mbus systems
+	//		clt.SubscribeMbus()
+	//	}
+
+	//clt.NI.nodeState.selectSupply(sp.Id)
+
+	return uint64(resp.MbusId), nil
+}
+
 // SelectDemand send select message to server
-func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
+func (clt *SXServiceClient) SelectDemandWithContext(ctx context.Context, dm *api.Demand) (uint64, error) {
 	tgt := &api.Target{
 		Id:          GenerateIntID(),
 		SenderId:    uint64(clt.ClientID),
 		TargetId:    dm.Id,
 		ChannelType: dm.ChannelType,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.SelectDemand(ctx, tgt)
 	if err != nil {
@@ -681,6 +735,11 @@ func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
 	//	}
 
 	return uint64(resp.MbusId), nil
+}
+
+// SelectDemand send select message to server
+func (clt *SXServiceClient) SelectDemand(dm *api.Demand) (uint64, error) {
+	return clt.SelectDemandWithContext(context.Background(), dm)
 }
 
 // SubscribeSupply  Wrapper function for SXServiceClient
@@ -720,6 +779,82 @@ func (clt *SXServiceClient) SubscribeSupply(ctx context.Context, spcb func(*SXSe
 	return err
 }
 
+type config struct {
+	Propagators    propagation.TextMapPropagator
+	TracerProvider trace.TracerProvider
+}
+type metadataSupplier struct {
+	metadata *metadata.MD
+}
+
+func newConfig() *config {
+	c := &config{
+		Propagators:    otel.GetTextMapPropagator(),
+		TracerProvider: otel.GetTracerProvider(),
+	}
+	return c
+}
+
+var _ propagation.TextMapCarrier = &metadataSupplier{}
+
+func (s *metadataSupplier) Get(key string) string {
+	values := s.metadata.Get(key)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func (s *metadataSupplier) Set(key string, value string) {
+	s.metadata.Set(key, value)
+}
+
+func (s *metadataSupplier) Keys() []string {
+	out := make([]string, 0, len(*s.metadata))
+	for key := range *s.metadata {
+		out = append(out, key)
+	}
+	return out
+}
+
+func Extract(ctx context.Context, metadata *metadata.MD) (baggage.Baggage, trace.SpanContext) {
+	c := newConfig()
+	ctx = c.Propagators.Extract(ctx, &metadataSupplier{
+		metadata: metadata,
+	})
+
+	return baggage.FromContext(ctx), trace.SpanContextFromContext(ctx)
+}
+
+// we need to convert spanCTX to trace.SpanContextConfig
+type spanCTX struct {
+	TraceID    string `json:"TraceID"`
+	SpanID     string `json:"SpanID"`
+	TraceFlags string `json:"TraceFlags"`
+	TraceState string `json:"TraceState"`
+	Remote     bool   `json:"Remote"`
+}
+
+func UnmarshalSpanContextJSON(jstr string) trace.SpanContext {
+	var spctx spanCTX
+
+	json.Unmarshal([]byte(jstr), &spctx)
+	traceState, _ := trace.ParseTraceState(spctx.TraceState)
+	traceId, _ := trace.TraceIDFromHex(spctx.TraceID)
+	spanId, _ := trace.SpanIDFromHex(spctx.SpanID)
+	trcFlag, _ := strconv.Atoi(spctx.TraceFlags)
+
+	spctxConf := trace.SpanContextConfig{
+		TraceID:    traceId,
+		SpanID:     spanId,
+		TraceFlags: trace.TraceFlags(byte(trcFlag)),
+		TraceState: traceState,
+		Remote:     spctx.Remote,
+	}
+
+	return trace.NewSpanContext(spctxConf)
+}
+
 // SubscribeDemand  Wrapper function for SXServiceClient
 func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXServiceClient, *api.Demand)) error {
 	ch := clt.getChannel()
@@ -728,9 +863,11 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 		log.Printf("sxutil: clt.SubscribeDemand Error [%v] %v", err, clt)
 		return err // sender should handle error...
 	}
+	tracer := otel.Tracer("subscribeDemand", trace.WithInstrumentationVersion("sxutil:0.0.1"))
 	for {
 		var dm *api.Demand
 		dm, err = dmc.Recv() // receive Demand
+
 		if err != nil {
 			if err == io.EOF {
 				log.Print("End Demand subscribe OK")
@@ -739,7 +876,46 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 			}
 			break
 		}
-		//	log.Println("Receive SD:",*dm)
+		//	log.Println("Receive SD:",*dm) // currently metadata can't be used.
+		//		metadata, _ := dmc.Header()
+		//		log.Printf("Receive MedaData:%#v", metadata)
+		//         result : metadata.MD{"content-type":[]string{"application/grpc"}}
+
+		//ctx2 := dmc.Context() // also context cant be used
+		//log.Printf("Received Context:%#v", ctx2)
+
+		//		log.Printf("Received DM.Arg:%s", dm.ArgJson)
+
+		//		bags, spanCtx := Extract(ctx, &metadata)
+		//		ctx = baggage.ContextWithBaggage(ctx, bags)
+
+		attrs := []attribute.KeyValue{semconv.RPCSystemKey.String("grpc")}
+
+		var cdatalen int = 0
+		if dm.Cdata != nil {
+			cdatalen = len(dm.Cdata.Entity)
+		}
+
+		//TODO: we need switch for performance
+		attrs = append(attrs,
+			attribute.Int64("sx.dm.Id", int64(dm.Id)),
+			attribute.Int64("sx.dm.SenderId", int64(dm.SenderId)),
+			attribute.Int64("sx.dm.TargetId", int64(dm.TargetId)),
+			attribute.Int("sx.dm.ChannelType", int(dm.ChannelType)),
+			attribute.Int64("sx.dm.MbusId", int64(dm.MbusId)),
+			attribute.Int("sx.dm.CdataLen", cdatalen),
+		)
+
+		var span trace.Span
+		spanCtx := UnmarshalSpanContextJSON(dm.ArgJson)
+		//		log.Printf("Created SpanContext:%#v", spanCtx)
+
+		ctx, span = tracer.Start(
+			trace.ContextWithRemoteSpanContext(ctx, spanCtx), // this is important!
+			"recvDemand:"+dm.DemandName,
+			trace.WithSpanKind(trace.SpanKindClient),
+			trace.WithAttributes(attrs...),
+		)
 
 		// call Callback!
 		if !clt.NI.nodeState.Locked {
@@ -747,6 +923,9 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 		} else {
 			log.Println("Provider is locked!")
 		}
+		log.Printf("Span End!  %#v", span)
+		span.End()
+
 	}
 	return err
 }
@@ -862,10 +1041,10 @@ func (clt *SXServiceClient) NotifyDemand(dmo *DemandOpts) (uint64, error) {
 		ArgJson:     dmo.JSON,
 		Cdata:       dmo.Cdata,
 	}
-	//	switch clt.ChannelType {
-	//	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+	if dmo.Context == nil { // if not set
+		dmo.Context = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(dmo.Context, MSG_TIME_OUT*time.Second)
 	defer cancel()
 
 	_, err := clt.SXClient.Client.NotifyDemand(ctx, &dm)
@@ -893,7 +1072,11 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 		ArgJson:     smo.JSON,
 		Cdata:       smo.Cdata,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
+
+	if smo.Context == nil { // if not set
+		smo.Context = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(smo.Context, MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.NotifySupply(ctx, &sp)
 	if err != nil {
@@ -904,8 +1087,8 @@ func (clt *SXServiceClient) NotifySupply(smo *SupplyOpts) (uint64, error) {
 	return id, nil
 }
 
-// Confirm sends confirm message to sender
-func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
+// Confirm With Context confirms with Context for OpenTelemetry
+func (clt *SXServiceClient) ConfirmWithContext(ctx context.Context, id IDType, pid IDType) error {
 	tg := &api.Target{
 		Id:          GenerateIntID(),
 		SenderId:    uint64(clt.ClientID),
@@ -913,6 +1096,7 @@ func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
 		ChannelType: clt.ChannelType,
 		MbusId:      uint64(id),
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), MSG_TIME_OUT*time.Second)
 	defer cancel()
 	resp, err := clt.SXClient.Client.Confirm(ctx, tg)
@@ -930,18 +1114,23 @@ func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
 	return nil
 }
 
+// Confirm sends confirm message to sender
+func (clt *SXServiceClient) Confirm(id IDType, pid IDType) error {
+	return clt.ConfirmWithContext(context.Background(), id, pid)
+}
+
 // Simple Robust SubscribeDemand/Supply with ReConnect function. (2020/09~ v0.5.0)
 
 func reconnectClient(client *SXServiceClient, servAddr string, mu *sync.Mutex) {
 	// may need to reset old connection to stop redialing.
-	
+
 	mu.Lock()
 	if client.SXClient != nil {
-	// may need to reset old connection to stop redialing.
-		log.Printf("sxutil: Conn state: %v closeErr: %v",client.SXClient.GrpcConn.GetState(), client.SXClient.GrpcConn.Close())
+		// may need to reset old connection to stop redialing.
+		log.Printf("sxutil: Conn state: %v closeErr: %v", client.SXClient.GrpcConn.GetState(), client.SXClient.GrpcConn.Close())
 
 		client.SXClient = nil
-		log.Printf("sxutil:Client reset with srvaddr:%s\n",servAddr)
+		log.Printf("sxutil:Client reset with srvaddr:%s\n", servAddr)
 	}
 	mu.Unlock()
 	time.Sleep(RECONNECT_WAIT * time.Second) // wait 5 seconds to reconnect
@@ -980,12 +1169,12 @@ func SubscribeDemand(client *SXServiceClient, dmcb func(*SXServiceClient, *api.D
 	for *loopFlag { // make it continuously working..
 		err := client.SubscribeDemand(ctx, dmcb)
 		//		log.Printf("sxutil:Error on subscribeDemand . %v", err)
-		
-		if client.SXClient != nil { 
+
+		if client.SXClient != nil {
 			servAddr = client.SXClient.ServerAddress
-			log.Printf("sxutil: reset server address %s, err:%v",servAddr,err)
+			log.Printf("sxutil: reset server address %s, err:%v", servAddr, err)
 		} else {
-			log.Printf("sxutil: SXClient is nil %v",err)
+			log.Printf("sxutil: SXClient is nil %v", err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
@@ -1012,10 +1201,6 @@ func (ni *NodeServInfo) RobustSubscribeSupply(specifiedSXAddress string) {
 	return s
         }*/
 
-
-
-
-
 // Continuous (error free) subscriber for supply
 func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.Supply), mu *sync.Mutex, loopFlag *bool) {
 	ctx := context.Background() //
@@ -1030,16 +1215,13 @@ func SubscribeSupply(client *SXServiceClient, spcb func(*SXServiceClient, *api.S
 		//
 		if client.SXClient != nil {
 			servAddr = client.SXClient.ServerAddress
-			log.Printf("sxutil: SubscribeSupply: reset server address [%s]",servAddr)
+			log.Printf("sxutil: SubscribeSupply: reset server address [%s]", servAddr)
 		} else {
 			log.Printf("sxutil: SXClient is nil in SubscribeSupply, err:%v", err)
 		}
 		reconnectClient(client, servAddr, mu)
 	}
 }
-
-
-
 
 // We need to simplify the logic of separate NotifyDemand/SelectSupply
 
