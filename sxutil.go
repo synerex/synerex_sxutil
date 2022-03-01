@@ -587,6 +587,19 @@ func (clt *SXServiceClient) IsDemandTarget(dm *api.Demand, idlist []uint64) bool
 	return false
 }
 
+// Get Unique NodeID for current client
+func (clt *SXServiceClient) GetNodeId() int32 {
+	return clt.NI.nid.NodeId
+}
+
+const nodeMask int64 = -1 ^ (-1 << 22)
+const nodeShift uint8 = 12
+
+// get NodeID from IDType (snowflake ID)
+func GetNodeIdFromId(id IDType) int32 {
+	return int32(int64(id) & nodeMask >> nodeShift)
+}
+
 // ProposeSupply send proposal Supply message to server
 func (clt *SXServiceClient) ProposeSupply(spo *SupplyOpts) uint64 {
 	pid := GenerateIntID()
@@ -688,11 +701,11 @@ func (clt *SXServiceClient) SelectSupply(sp *api.Supply) (uint64, error) {
 }
 
 func (clt *SXServiceClient) SelectModifiedSupplyWithContext(ctx context.Context, sp *api.Supply) (uint64, error) {
-	ctx, cancel := context.WithTimeout(ctx, MSG_TIME_OUT*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second) // cancel with 3 second!
 	defer cancel()
 	resp, err := clt.SXClient.Client.SelectModifiedSupply(ctx, sp)
 	if err != nil {
-		log.Printf("%v.SelectSupply err %v %v", clt, err, resp)
+		log.Printf("SelectModSupply err: clt %#v err:%v resp:%v", clt, err, resp)
 		return 0, err
 	}
 	log.Println("SelectModifiedSupply Response:", resp)
@@ -923,7 +936,7 @@ func (clt *SXServiceClient) SubscribeDemand(ctx context.Context, dmcb func(*SXSe
 		} else {
 			log.Println("Provider is locked!")
 		}
-		log.Printf("Span End!  %#v", span)
+		log.Printf("Span End! %s", span.SpanContext().SpanID().String())
 		span.End()
 
 	}

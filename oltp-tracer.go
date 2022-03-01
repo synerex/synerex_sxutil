@@ -1,7 +1,6 @@
 package sxutil
 
 import (
-	"flag"
 	"log"
 
 	//	"github.com/uber/jaeger-client-go"
@@ -13,16 +12,22 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-var (
-	jaegerHost = flag.String("jaegerHost", "127.0.0.1", "OpenTelemetry Jaeger host")
-)
+//var (
+//	jaegerHost = flag.String("jaegerHost", "127.0.0.1", "OpenTelemetry Jaeger host")
+//)
 
 // Init configures an OpenTelemetry exporter and trace provider
 func NewOltpTracer() *sdktrace.TracerProvider {
 	//	exporter, err := stdout.New(stdout.WithPrettyPrint())
-	exporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint("http://" + *jaegerHost + ":14268/api/traces")))
+	// Jaeger Export port is defined through environment variables
+	//     OTEL_SERVICE_NAME=agent_name ,
+	//     OTEL_EXPORTER_JAEGER_AGENT_HOST=127.0.0.1 ,
+	//     OTEL_EXPORTER_JAEGER_ENDPOINT=http://127.0.0.1:14268/api/traces
+	// check envionment variable..
+	//	exporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint("http://" + *jaegerHost + ":14268/api/traces")))
+	exporter, err := jaeger.New(jaeger.WithCollectorEndpoint())
 	if err != nil {
-		log.Fatal("Can't open jaeger tracer ", err)
+		log.Fatal("sxutil:Can't open jaeger tracer ", err)
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
